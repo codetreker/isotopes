@@ -1,0 +1,54 @@
+{
+  "name": "isotopes",
+  "version": "0.1.0",
+  "description": "Lightweight, self-hostable AI agent framework",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "ci": "npm run lint && npm run typecheck && npm run test"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "llm",
+    "discord",
+    "openai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.27.0",
+    "@types/node": "22.15.18",
+    "@typescript-eslint/eslint-plugin": "8.32.1",
+    "@typescript-eslint/parser": "8.32.1",
+    "eslint": "9.27.0",
+    "tsx": "4.19.4",
+    "typescript": "5.8.3",
+    "typescript-eslint": "8.32.1",
+    "vitest": "3.1.3"
+  },
+  "dependencies": {
+    "@openai/agents": "0.0.7",
+    "discord.js": "14.18.0",
+    "openai": "4.96.0",
+    "yaml": "2.7.1",
+    "zod": "3.24.4"
+  }
+}
