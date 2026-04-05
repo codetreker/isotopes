@@ -51,8 +51,6 @@ export type { WorkspaceContext } from "./core/workspace.js";
 
 export {
   loadConfig,
-  findConfigFile,
-  loadConfigFromDir,
   toAgentConfig,
   getDiscordToken,
 } from "./core/config.js";
@@ -76,3 +74,19 @@ export type { DiscordTransportConfig } from "./transports/discord.js";
 
 export { logger, loggers, createLogger } from "./core/logger.js";
 export type { Logger, LogLevel } from "./core/logger.js";
+
+// ---------------------------------------------------------------------------
+// Paths
+// ---------------------------------------------------------------------------
+
+export {
+  getIsotopesHome,
+  getWorkspacesDir,
+  getLogsDir,
+  getWorkspacePath,
+  getConfigPath,
+  getSessionsDir as getAgentSessionsDir,
+  ensureDirectories,
+  ensureWorkspaceDir,
+  resolveWorkspacePath,
+} from "./core/paths.js";
