@@ -18,6 +18,7 @@ import type {
   SessionStore,
   Transport,
 } from "../core/types.js";
+import { textContent } from "../core/types.js";
 import { loggers } from "../core/logger.js";
 
 const log = loggers.discord;
@@ -29,6 +30,7 @@ export interface DiscordTransportConfig {
   token: string;
   agentManager: AgentManager;
   sessionStore: SessionStore;
+  sessionStoreForAgent?: (agentId: string) => SessionStore;
   /** Default agent ID to use when no @mention routing */
   defaultAgentId?: string;
   /** Map of Discord bot user ID → agent ID for multi-agent routing */
@@ -105,9 +107,11 @@ export class DiscordTransport implements Transport {
       return;
     }
 
+    const sessionStore = this.getSessionStore(agentId);
+
     // Get or create session
     const sessionKey = this.getSessionKey(msg, agentId);
-    const session = await this.findOrCreateSession(sessionKey, agentId, msg);
+    const session = await this.findOrCreateSession(sessionStore, sessionKey, agentId, msg);
 
     // Extract message content (strip @mentions)
     const content = this.extractContent(msg);
@@ -116,17 +120,25 @@ export class DiscordTransport implements Transport {
     // Add user message to session
     const userMessage: Message = {
       role: "user",
-      content,
+      content: textContent(content),
       timestamp: msg.createdTimestamp,
       metadata: {
         userId: msg.author.id,
         username: msg.author.username,
       },
     };
-    await this.config.sessionStore.addMessage(session.id, userMessage);
+    await sessionStore.addMessage(session.id, userMessage);
+
+    const promptInput = await sessionStore.getMessages(session.id);
 
     // Run agent and stream response
-    await this.runAgentAndRespond(agent, content, msg.channel as SendableChannel, session.id);
+    await this.runAgentAndRespond(
+      agent,
+      promptInput,
+      msg.channel as SendableChannel,
+      session.id,
+      sessionStore,
+    );
   }
 
   private shouldRespond(msg: DiscordMessage): boolean {
@@ -164,6 +176,10 @@ export class DiscordTransport implements Transport {
     return this.config.defaultAgentId ?? "default";
   }
 
+  private getSessionStore(agentId: string): SessionStore {
+    return this.config.sessionStoreForAgent?.(agentId) ?? this.config.sessionStore;
+  }
+
   private getSessionKey(msg: DiscordMessage, agentId: string): string {
     const botId = this.client.user?.id ?? "unknown";
 
@@ -177,13 +193,20 @@ export class DiscordTransport implements Transport {
   }
 
   private async findOrCreateSession(
+    sessionStore: SessionStore,
     sessionKey: string,
     agentId: string,
     msg: DiscordMessage,
   ) {
     // Try to find existing session by key
-    // For now, create new session each time (TODO: session lookup by key)
-    const session = await this.config.sessionStore.create(agentId, {
+    const existing = await sessionStore.findByKey(sessionKey);
+    if (existing) {
+      return existing;
+    }
+
+    // Create new session with key
+    const session = await sessionStore.create(agentId, {
+      key: sessionKey,
       transport: "discord",
       channelId: msg.channelId,
       threadId: msg.thread?.id,
@@ -197,9 +220,10 @@ export class DiscordTransport implements Transport {
 
   private async runAgentAndRespond(
     agent: AgentInstance,
-    input: string,
+    input: string | Message[],
     channel: SendableChannel,
     sessionId: string,
+    sessionStore: SessionStore,
   ): Promise<void> {
     // Start typing indicator
     const typing = this.startTyping(channel);
@@ -227,9 +251,9 @@ export class DiscordTransport implements Transport {
         } else if (event.type === "agent_end") {
           // Store final assistant message
           if (responseText) {
-            await this.config.sessionStore.addMessage(sessionId, {
+            await sessionStore.addMessage(sessionId, {
               role: "assistant",
-              content: responseText,
+              content: textContent(responseText),
               timestamp: Date.now(),
             });
           }
@@ -247,9 +271,9 @@ export class DiscordTransport implements Transport {
         await this.updateOrSendMessage(channel, sentMessage, responseText);
       }
       if (finalErrorMessage) {
-        await this.config.sessionStore.addMessage(sessionId, {
+        await sessionStore.addMessage(sessionId, {
           role: "assistant",
-          content: finalErrorMessage,
+          content: textContent(finalErrorMessage),
           timestamp: Date.now(),
           metadata: { isError: true },
         });

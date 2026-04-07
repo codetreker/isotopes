@@ -41,6 +41,7 @@ vi.mock("@mariozechner/pi-ai", () => ({
 import { Agent } from "@mariozechner/pi-agent-core";
 import { getModel } from "@mariozechner/pi-ai";
 import { PiMonoCore } from "./pi-mono.js";
+import { textContent } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -92,24 +93,24 @@ describe("PiMonoCore.createAgent", () => {
   it("steer() delegates to the underlying Agent with mapped message", () => {
     const core = new PiMonoCore();
     const instance = core.createAgent(makeConfig());
-    const msg: Message = { role: "user", content: "hi", timestamp: 5000 };
+    const msg: Message = { role: "user", content: textContent("hi"), timestamp: 5000 };
 
     instance.steer(msg);
 
     expect(mockAgent.steer).toHaveBeenCalledWith(
-      expect.objectContaining({ role: "user", content: "hi", timestamp: 5000 }),
+      expect.objectContaining({ role: "user", content: textContent("hi"), timestamp: 5000 }),
     );
   });
 
   it("followUp() delegates to the underlying Agent with mapped message", () => {
     const core = new PiMonoCore();
     const instance = core.createAgent(makeConfig());
-    const msg: Message = { role: "user", content: "follow up" };
+    const msg: Message = { role: "user", content: textContent("follow up") };
 
     instance.followUp(msg);
 
     expect(mockAgent.followUp).toHaveBeenCalledWith(
-      expect.objectContaining({ role: "user", content: "follow up" }),
+      expect.objectContaining({ role: "user", content: textContent("follow up") }),
     );
   });
 
@@ -301,6 +302,44 @@ describe("prompt() event mapping", () => {
     expect(events).toContainEqual({ type: "turn_start" });
   });
 
+  it("maps prompt history messages to content blocks", async () => {
+    setupEvents([]);
+    const core = new PiMonoCore();
+    const instance = core.createAgent(makeConfig());
+
+    for await (const _ev of instance.prompt([
+      { role: "user", content: textContent("hello"), timestamp: 1000 },
+      { role: "assistant", content: textContent("hi there"), timestamp: 2000 },
+      {
+        role: "tool_result",
+        content: [{ type: "tool_result", output: "tool output", toolCallId: "call-1", toolName: "readFile" }],
+        timestamp: 3000,
+      },
+    ])) {
+      void _ev;
+    }
+
+    expect(mockAgent.prompt).toHaveBeenCalledWith([
+      {
+        role: "user",
+        content: textContent("hello"),
+        timestamp: 1000,
+      },
+      {
+        role: "assistant",
+        content: textContent("hi there"),
+        timestamp: 2000,
+      },
+      {
+        role: "toolResult",
+        content: "tool output",
+        timestamp: 3000,
+        toolCallId: "call-1",
+        toolName: "readFile",
+      },
+    ]);
+  });
+
   it("maps turn_end", async () => {
     const events = await collectEvents([
       { type: "turn_end", message: {}, toolResults: [] },
@@ -361,7 +400,13 @@ describe("prompt() event mapping", () => {
         messages: [
           { role: "user", content: "hi", timestamp: 1000 },
           { role: "assistant", content: "hello", timestamp: 2000 },
-          { role: "toolResult", content: "result data", timestamp: 3000 },
+          {
+            role: "toolResult",
+            content: "result data",
+            timestamp: 3000,
+            toolCallId: "call-2",
+            toolName: "readFile",
+          },
         ],
       },
     ]);
@@ -371,8 +416,13 @@ describe("prompt() event mapping", () => {
     expect(agentEnd.type).toBe("agent_end");
     expect(agentEnd.messages).toHaveLength(3);
     expect(agentEnd.messages[0].role).toBe("user");
+    expect(agentEnd.messages[0].content).toEqual(textContent("hi"));
     expect(agentEnd.messages[1].role).toBe("assistant");
+    expect(agentEnd.messages[1].content).toEqual(textContent("hello"));
     expect(agentEnd.messages[2].role).toBe("tool_result");
+    expect(agentEnd.messages[2].content).toEqual([
+      { type: "text", text: "result data" },
+    ]);
   });
 
   it("maps agent_end error metadata from assistant message", async () => {
@@ -451,7 +501,7 @@ describe("Message conversion", () => {
   it("maps user role to user", () => {
     const core = new PiMonoCore();
     const instance = core.createAgent(makeConfig());
-    instance.steer({ role: "user", content: "hi" });
+    instance.steer({ role: "user", content: textContent("hi") });
 
     expect(mockAgent.steer).toHaveBeenCalledWith(
       expect.objectContaining({ role: "user" }),
@@ -461,7 +511,7 @@ describe("Message conversion", () => {
   it("maps assistant role to assistant", () => {
     const core = new PiMonoCore();
     const instance = core.createAgent(makeConfig());
-    instance.steer({ role: "assistant", content: "hey" });
+    instance.steer({ role: "assistant", content: textContent("hey") });
 
     expect(mockAgent.steer).toHaveBeenCalledWith(
       expect.objectContaining({ role: "assistant" }),
@@ -471,10 +521,13 @@ describe("Message conversion", () => {
   it("maps tool_result role to toolResult", () => {
     const core = new PiMonoCore();
     const instance = core.createAgent(makeConfig());
-    instance.steer({ role: "tool_result", content: "output" });
+    instance.steer({
+      role: "tool_result",
+      content: [{ type: "tool_result", output: "output", toolCallId: "call-3", toolName: "runTool" }],
+    });
 
     expect(mockAgent.steer).toHaveBeenCalledWith(
-      expect.objectContaining({ role: "toolResult" }),
+      expect.objectContaining({ role: "toolResult", content: "output", toolCallId: "call-3", toolName: "runTool" }),
     );
   });
 
@@ -484,7 +537,7 @@ describe("Message conversion", () => {
 
     const core = new PiMonoCore();
     const instance = core.createAgent(makeConfig());
-    instance.steer({ role: "user", content: "test" });
+    instance.steer({ role: "user", content: textContent("test") });
 
     expect(mockAgent.steer).toHaveBeenCalledWith(
       expect.objectContaining({ timestamp: now }),

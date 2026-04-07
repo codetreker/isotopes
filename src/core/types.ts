@@ -5,9 +5,39 @@
 // Messages
 // ---------------------------------------------------------------------------
 
+export interface TextContentBlock {
+  type: 'text';
+  text: string;
+}
+
+export interface ToolResultContentBlock {
+  type: 'tool_result';
+  output: string;
+  isError?: boolean;
+  toolCallId?: string;
+  toolName?: string;
+}
+
+export type MessageContentBlock = TextContentBlock | ToolResultContentBlock;
+
+export function textContent(text: string): MessageContentBlock[] {
+  return [{ type: 'text', text }];
+}
+
+export function messageContentToPlainText(content: MessageContentBlock[]): string {
+  return content
+    .map((block) => {
+      if (block.type === 'text') {
+        return block.text;
+      }
+      return block.output;
+    })
+    .join("\n");
+}
+
 export interface Message {
   role: 'user' | 'assistant' | 'tool_result';
-  content: string;
+  content: MessageContentBlock[];
   timestamp?: number;
   metadata?: Record<string, unknown>;
 }
@@ -106,6 +136,7 @@ export interface Session {
 }
 
 export interface SessionMetadata {
+  key?: string;                        // Unique key for session lookup (e.g., discord:{botId}:channel:{id}:{agentId})
   transport: 'discord' | 'feishu' | 'web';
   channelId?: string;
   threadId?: string;
@@ -120,6 +151,7 @@ export interface SessionStoreConfig {
 export interface SessionStore {
   create(agentId: string, metadata?: SessionMetadata): Promise<Session>;
   get(sessionId: string): Promise<Session | undefined>;
+  findByKey(key: string): Promise<Session | undefined>;
   addMessage(sessionId: string, message: Message): Promise<void>;
   getMessages(sessionId: string): Promise<Message[]>;
   delete(sessionId: string): Promise<void>;
