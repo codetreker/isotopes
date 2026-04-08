@@ -1,10 +1,21 @@
 // src/core/tools.test.ts — Unit tests for ToolRegistry
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import fs from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
 import {
   ToolRegistry,
+  buildToolGuardPrompt,
   createEchoTool,
   createTimeTool,
+  createShellTool,
+  createReadFileTool,
+  createWriteFileTool,
+  createListDirTool,
+  createWorkspaceTools,
+  createWorkspaceToolsWithGuards,
+  resolveToolGuards,
   type ToolHandler,
 } from "./tools.js";
 import type { Tool } from "./types.js";
@@ -186,6 +197,213 @@ describe("Built-in tools", () => {
       const result = await handler({ timezone: "Invalid/Zone" });
 
       expect(result).toContain("Invalid timezone");
+    });
+  });
+
+  describe("createShellTool", () => {
+    it("executes command and returns output", async () => {
+      const { handler } = createShellTool();
+      const result = await handler({ command: "echo hello" });
+
+      expect(result.trim()).toBe("hello");
+    });
+
+    it("respects cwd option", async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "shell-test-"));
+      try {
+        const { handler } = createShellTool({ cwd: tempDir });
+        const result = await handler({ command: "pwd" });
+
+        // macOS: /var is symlinked to /private/var
+        expect(result.trim()).toContain(path.basename(tempDir));
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("returns error for failed command", async () => {
+      const { handler } = createShellTool();
+      const result = await handler({ command: "exit 1" });
+
+      expect(result).toContain("[error]");
+    });
+  });
+
+  describe("createReadFileTool", () => {
+    let tempDir: string;
+
+    beforeEach(async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "read-test-"));
+    });
+
+    afterEach(async () => {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    });
+
+    it("reads file content", async () => {
+      const testFile = path.join(tempDir, "test.txt");
+      await fs.writeFile(testFile, "hello world");
+
+      const { handler } = createReadFileTool({ basePath: tempDir });
+      const result = await handler({ path: "test.txt" });
+
+      expect(result).toBe("hello world");
+    });
+
+    it("returns error for missing file", async () => {
+      const { handler } = createReadFileTool({ basePath: tempDir });
+      const result = await handler({ path: "nonexistent.txt" });
+
+      expect(result).toContain("[error]");
+      expect(result).toContain("not found");
+    });
+
+    it("rejects paths that escape the workspace", async () => {
+      const outsideFile = path.join(os.tmpdir(), `outside-${Date.now()}.txt`);
+      await fs.writeFile(outsideFile, "secret");
+
+      try {
+        const { handler } = createReadFileTool({ basePath: tempDir });
+        const result = await handler({ path: outsideFile });
+
+        expect(result).toContain("[error]");
+        expect(result).toContain("Path escapes workspace");
+      } finally {
+        await fs.rm(outsideFile, { force: true });
+      }
+    });
+  });
+
+  describe("createWriteFileTool", () => {
+    let tempDir: string;
+
+    beforeEach(async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "write-test-"));
+    });
+
+    afterEach(async () => {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    });
+
+    it("writes file content", async () => {
+      const { handler } = createWriteFileTool({ basePath: tempDir });
+      const result = await handler({ path: "test.txt", content: "new content" });
+
+      expect(result).toContain("Successfully wrote");
+      const content = await fs.readFile(path.join(tempDir, "test.txt"), "utf-8");
+      expect(content).toBe("new content");
+    });
+
+    it("creates parent directories", async () => {
+      const { handler } = createWriteFileTool({ basePath: tempDir });
+      await handler({ path: "nested/dir/test.txt", content: "nested" });
+
+      const content = await fs.readFile(path.join(tempDir, "nested/dir/test.txt"), "utf-8");
+      expect(content).toBe("nested");
+    });
+
+    it("rejects writes that escape the workspace", async () => {
+      const outsideFile = path.join(os.tmpdir(), `outside-write-${Date.now()}.txt`);
+
+      try {
+        const { handler } = createWriteFileTool({ basePath: tempDir });
+        const result = await handler({ path: outsideFile, content: "blocked" });
+
+        expect(result).toContain("[error]");
+        expect(result).toContain("Path escapes workspace");
+      } finally {
+        await fs.rm(outsideFile, { force: true });
+      }
+    });
+  });
+
+  describe("createListDirTool", () => {
+    let tempDir: string;
+
+    beforeEach(async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "list-test-"));
+    });
+
+    afterEach(async () => {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    });
+
+    it("lists directory contents", async () => {
+      await fs.writeFile(path.join(tempDir, "file1.txt"), "");
+      await fs.mkdir(path.join(tempDir, "subdir"));
+
+      const { handler } = createListDirTool({ basePath: tempDir });
+      const result = await handler({ path: "." });
+
+      expect(result).toContain("file1.txt");
+      expect(result).toContain("[dir]");
+      expect(result).toContain("subdir");
+    });
+
+    it("returns error for missing directory", async () => {
+      const { handler } = createListDirTool({ basePath: tempDir });
+      const result = await handler({ path: "nonexistent" });
+
+      expect(result).toContain("[error]");
+      expect(result).toContain("not found");
+    });
+
+    it("rejects directories that escape the workspace", async () => {
+      const { handler } = createListDirTool({ basePath: tempDir });
+      const result = await handler({ path: os.tmpdir() });
+
+      expect(result).toContain("[error]");
+      expect(result).toContain("Path escapes workspace");
+    });
+  });
+
+  describe("createWorkspaceTools", () => {
+    it("creates all standard workspace tools", () => {
+      const tools = createWorkspaceTools("/tmp/workspace");
+
+      const names = tools.map((t) => t.tool.name);
+      expect(names).toContain("read_file");
+      expect(names).toContain("write_file");
+      expect(names).toContain("list_dir");
+      expect(names).toContain("get_current_time");
+      expect(names).not.toContain("shell");
+    });
+
+    it("enables shell when cli guard is turned on", () => {
+      const tools = createWorkspaceToolsWithGuards("/tmp/workspace", { cli: true });
+
+      expect(tools.map((entry) => entry.tool.name)).toContain("shell");
+    });
+  });
+
+  describe("resolveToolGuards", () => {
+    it("defaults cli off and workspaceOnly on", () => {
+      expect(resolveToolGuards()).toEqual({
+        cli: false,
+        fs: { workspaceOnly: true },
+      });
+    });
+
+    it("supports explicit cli on and workspaceOnly off", () => {
+      expect(resolveToolGuards({ cli: true, fs: { workspaceOnly: false } })).toEqual({
+        cli: true,
+        fs: { workspaceOnly: false },
+      });
+    });
+  });
+
+  describe("buildToolGuardPrompt", () => {
+    it("describes the active tools and guardrails", () => {
+      const prompt = buildToolGuardPrompt(
+        createWorkspaceToolsWithGuards("/tmp/workspace", { cli: true }).map((entry) => entry.tool),
+        { cli: true, fs: { workspaceOnly: true } },
+        "/tmp/workspace",
+      );
+
+      expect(prompt).toContain("Only the following tools are available");
+      expect(prompt).toContain("shell");
+      expect(prompt).toContain("restricted to the workspace: /tmp/workspace");
+      expect(prompt).toContain("Shell command execution is enabled");
     });
   });
 });

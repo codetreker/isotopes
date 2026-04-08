@@ -11,6 +11,12 @@ import { DefaultSessionStore } from "./core/session-store.js";
 import { DiscordTransport } from "./transports/discord.js";
 import { logger } from "./core/logger.js";
 import {
+  ToolRegistry,
+  buildToolGuardPrompt,
+  createWorkspaceToolsWithGuards,
+  resolveToolGuards,
+} from "./core/tools.js";
+import {
   getConfigPath,
   ensureDirectories,
   ensureWorkspaceDir,
@@ -70,13 +76,13 @@ async function main() {
   const config = await loadConfig(configPath);
   logger.info(`Loaded ${config.agents.length} agent(s)`);
 
-  // Initialize core
+  // Initialize core with tool registry
   const core = new PiMonoCore();
   const agentManager = new DefaultAgentManager(core);
 
-  // Create agents
+  // Create agents with workspace tools
   for (const agentFile of config.agents) {
-    const agentConfig = toAgentConfig(agentFile, config.provider);
+    const agentConfig = toAgentConfig(agentFile, config.provider, config.tools);
 
     // Resolve workspace path
     if (agentConfig.workspacePath) {
@@ -86,8 +92,24 @@ async function main() {
       agentConfig.workspacePath = await ensureWorkspaceDir(agentConfig.id);
     }
 
+    // Register workspace tools for this agent
+    const resolvedToolGuards = resolveToolGuards(agentConfig.toolSettings);
+    const toolRegistry = new ToolRegistry();
+    const workspaceTools = createWorkspaceToolsWithGuards(
+      agentConfig.workspacePath,
+      agentConfig.toolSettings,
+    );
+    for (const { tool, handler } of workspaceTools) {
+      toolRegistry.register(tool, handler);
+    }
+    agentConfig.systemPrompt = [
+      agentConfig.systemPrompt,
+      buildToolGuardPrompt(toolRegistry.list(), resolvedToolGuards, agentConfig.workspacePath),
+    ].filter(Boolean).join("\n\n---\n\n");
+    core.setToolRegistry(agentConfig.id, toolRegistry);
+
     await agentManager.create(agentConfig);
-    logger.info(`Created agent: ${agentConfig.id} (workspace: ${agentConfig.workspacePath})`);
+    logger.info(`Created agent: ${agentConfig.id} (workspace: ${agentConfig.workspacePath}, tools: ${toolRegistry.list().length})`);
   }
 
   // Start Discord transport if configured
