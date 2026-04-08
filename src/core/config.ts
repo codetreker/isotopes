@@ -4,7 +4,19 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
-import type { AgentConfig, AgentToolSettings, ProviderConfig } from "./types.js";
+import type {
+  AgentConfig,
+  AgentToolSettings,
+  Binding,
+  BindingPeer,
+  ChannelsConfig,
+  CompactionConfig,
+  CompactionMode,
+  DiscordAccountConfig,
+  GuildConfig,
+  PeerKind,
+  ProviderConfig,
+} from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Config schema
@@ -27,6 +39,7 @@ export interface AgentConfigFile {
   workspacePath?: string;
   tools?: AgentToolsConfigFile;
   provider?: ProviderConfigFile;
+  compaction?: CompactionConfigFile;
 }
 
 export interface AgentToolsConfigFile {
@@ -34,6 +47,33 @@ export interface AgentToolsConfigFile {
   fs?: {
     workspaceOnly?: boolean;
   };
+}
+
+/** Compaction configuration in config file */
+export interface CompactionConfigFile {
+  mode?: string;
+  contextWindow?: number;
+  threshold?: number;
+  preserveRecent?: number;
+}
+
+/** Peer reference in binding config */
+export interface BindingPeerConfigFile {
+  kind: string;
+  id: string;
+}
+
+/** Match criteria in binding config */
+export interface BindingMatchConfigFile {
+  channel: string;
+  accountId?: string;
+  peer?: BindingPeerConfigFile;
+}
+
+/** A single binding entry in config file */
+export interface BindingConfigFile {
+  agentId: string;
+  match: BindingMatchConfigFile;
 }
 
 /** Discord transport configuration */
@@ -52,10 +92,16 @@ export interface IsotopesConfigFile {
   provider?: ProviderConfigFile;
   /** Default tool policy/guards for all agents */
   tools?: AgentToolsConfigFile;
+  /** Default compaction config for all agents */
+  compaction?: CompactionConfigFile;
   /** Agent definitions */
   agents: AgentConfigFile[];
+  /** Agent ↔ Channel bindings */
+  bindings?: BindingConfigFile[];
   /** Discord transport config */
   discord?: DiscordConfigFile;
+  /** Channel configurations (per-guild/group settings) */
+  channels?: ChannelsConfig;
 }
 
 export function resolveToolSettings(
@@ -67,6 +113,37 @@ export function resolveToolSettings(
     fs: {
       workspaceOnly: agentTools?.fs?.workspaceOnly ?? defaultTools?.fs?.workspaceOnly ?? true,
     },
+  };
+}
+
+const VALID_COMPACTION_MODES = new Set<string>(["off", "safeguard", "aggressive"]);
+
+/**
+ * Resolve compaction config, merging agent-level overrides with defaults.
+ * Returns undefined if compaction is not configured at all.
+ */
+export function resolveCompactionConfigFromFile(
+  agentCompaction?: CompactionConfigFile,
+  defaultCompaction?: CompactionConfigFile,
+): CompactionConfig | undefined {
+  // If neither agent nor default has compaction config, return undefined
+  if (!agentCompaction && !defaultCompaction) return undefined;
+
+  const rawMode = agentCompaction?.mode ?? defaultCompaction?.mode ?? "safeguard";
+
+  if (!VALID_COMPACTION_MODES.has(rawMode)) {
+    throw new Error(
+      `Invalid compaction mode "${rawMode}" (must be off, safeguard, or aggressive)`,
+    );
+  }
+
+  const mode = rawMode as CompactionMode;
+
+  return {
+    mode,
+    contextWindow: agentCompaction?.contextWindow ?? defaultCompaction?.contextWindow,
+    threshold: agentCompaction?.threshold ?? defaultCompaction?.threshold,
+    preserveRecent: agentCompaction?.preserveRecent ?? defaultCompaction?.preserveRecent,
   };
 }
 
@@ -113,7 +190,10 @@ export function toAgentConfig(
   agent: AgentConfigFile,
   defaultProvider?: ProviderConfigFile,
   defaultTools?: AgentToolsConfigFile,
+  defaultCompaction?: CompactionConfigFile,
 ): AgentConfig {
+  const compaction = resolveCompactionConfigFromFile(agent.compaction, defaultCompaction);
+
   return {
     id: agent.id,
     name: agent.name,
@@ -121,7 +201,65 @@ export function toAgentConfig(
     workspacePath: agent.workspacePath,
     toolSettings: resolveToolSettings(agent.tools, defaultTools),
     provider: (agent.provider ?? defaultProvider) as ProviderConfig | undefined,
+    ...(compaction ? { compaction } : {}),
   };
+}
+
+const VALID_PEER_KINDS = new Set<string>(["group", "dm", "thread"]);
+
+/**
+ * Convert config file bindings to Binding[].
+ * Validates that all referenced agentIds exist and peer kinds are valid.
+ */
+export function toBindings(
+  bindingsConfig: BindingConfigFile[] | undefined,
+  agents: AgentConfigFile[],
+): Binding[] {
+  if (!bindingsConfig || bindingsConfig.length === 0) return [];
+
+  const agentIds = new Set(agents.map((a) => a.id));
+
+  return bindingsConfig.map((entry, i) => {
+    // Validate agentId exists
+    if (!agentIds.has(entry.agentId)) {
+      throw new Error(
+        `bindings[${i}]: agentId "${entry.agentId}" does not match any defined agent`,
+      );
+    }
+
+    // Validate match.channel is present
+    if (!entry.match?.channel) {
+      throw new Error(`bindings[${i}]: match.channel is required`);
+    }
+
+    // Validate peer kind if present
+    if (entry.match.peer) {
+      if (!VALID_PEER_KINDS.has(entry.match.peer.kind)) {
+        throw new Error(
+          `bindings[${i}]: invalid peer.kind "${entry.match.peer.kind}" (must be group, dm, or thread)`,
+        );
+      }
+      if (!entry.match.peer.id) {
+        throw new Error(`bindings[${i}]: peer.id is required when peer is specified`);
+      }
+    }
+
+    const binding: Binding = {
+      agentId: entry.agentId,
+      match: {
+        channel: entry.match.channel,
+        ...(entry.match.accountId !== undefined && { accountId: entry.match.accountId }),
+        ...(entry.match.peer !== undefined && {
+          peer: {
+            kind: entry.match.peer.kind as PeerKind,
+            id: String(entry.match.peer.id),
+          } satisfies BindingPeer,
+        }),
+      },
+    };
+
+    return binding;
+  });
 }
 
 /**
@@ -139,6 +277,35 @@ export function getDiscordToken(discord: DiscordConfigFile): string {
     return token;
   }
   throw new Error("Discord config must have either 'token' or 'tokenEnv'");
+}
+
+// ---------------------------------------------------------------------------
+// Channel config helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Look up the GuildConfig for a specific Discord guild under a given account.
+ * Returns undefined if no guild-specific config exists.
+ */
+export function getDiscordGuildConfig(
+  channels: ChannelsConfig | undefined,
+  accountId: string,
+  guildId: string,
+): GuildConfig | undefined {
+  return channels?.discord?.accounts?.[accountId]?.guilds?.[guildId];
+}
+
+/**
+ * Resolve whether @mention is required for a given Discord guild.
+ * Default: true (only respond when @mentioned).
+ */
+export function isRequireMention(
+  channels: ChannelsConfig | undefined,
+  accountId: string,
+  guildId: string,
+): boolean {
+  const guildConfig = getDiscordGuildConfig(channels, accountId, guildId);
+  return guildConfig?.requireMention ?? true;
 }
 
 // ---------------------------------------------------------------------------

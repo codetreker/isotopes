@@ -103,6 +103,8 @@ export interface AgentConfig {
   provider?: ProviderConfig;
   /** Path to agent's workspace directory (contains SOUL.md, MEMORY.md, sessions/) */
   workspacePath?: string;
+  /** Context compaction configuration */
+  compaction?: CompactionConfig;
 }
 
 export interface AgentInstance {
@@ -165,6 +167,86 @@ export interface SessionStore {
   addMessage(sessionId: string, message: Message): Promise<void>;
   getMessages(sessionId: string): Promise<Message[]>;
   delete(sessionId: string): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Bindings — route messages to agents by (channel, accountId, peer)
+// ---------------------------------------------------------------------------
+
+/** Peer kind: group channel, direct message, or thread */
+export type PeerKind = 'group' | 'dm' | 'thread';
+
+/** Peer identifier — a specific chat target within a channel+account */
+export interface BindingPeer {
+  kind: PeerKind;
+  id: string;
+}
+
+/** Match criteria for a binding rule */
+export interface BindingMatch {
+  /** Transport channel type (e.g. "discord", "feishu") */
+  channel: string;
+  /** Account identifier within that channel */
+  accountId?: string;
+  /** Specific peer (group/dm/thread) to scope the binding */
+  peer?: BindingPeer;
+}
+
+/** A binding ties an agent to a (channel, accountId, peer) pattern */
+export interface Binding {
+  agentId: string;
+  match: BindingMatch;
+}
+
+// ---------------------------------------------------------------------------
+// Channel config — per-guild/group settings
+// ---------------------------------------------------------------------------
+
+/** Per-guild (Discord) or per-group (Feishu) configuration */
+export interface GuildConfig {
+  /** Whether the bot must be @mentioned to respond. Default: true */
+  requireMention?: boolean;
+}
+
+/** Discord account configuration within the channels section */
+export interface DiscordAccountConfig {
+  token?: string;
+  tokenEnv?: string;
+  groupPolicy?: string;
+  /** Per-guild configuration keyed by guild ID */
+  guilds?: Record<string, GuildConfig>;
+}
+
+/** Channels section of the configuration */
+export interface ChannelsConfig {
+  discord?: {
+    enabled?: boolean;
+    accounts?: Record<string, DiscordAccountConfig>;
+  };
+  feishu?: {
+    enabled?: boolean;
+    accounts?: Record<string, unknown>;
+    groups?: Record<string, GuildConfig>;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Compaction — context window management
+// ---------------------------------------------------------------------------
+
+/** Compaction mode for managing context window size */
+export type CompactionMode = 'off' | 'safeguard' | 'aggressive';
+
+/** Configuration for context compaction */
+export interface CompactionConfig {
+  /** Compaction mode. Default: 'safeguard' */
+  mode: CompactionMode;
+  /** Maximum context window size in tokens. Default: 128000 */
+  contextWindow?: number;
+  /** Threshold ratio (0–1) at which compaction triggers. Default: 0.8 for safeguard, 0.5 for aggressive */
+  threshold?: number;
+  /** Number of recent messages to preserve (not summarized). Default: 10 */
+  preserveRecent?: number;
 }
 
 // ---------------------------------------------------------------------------
