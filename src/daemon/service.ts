@@ -4,19 +4,21 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { exec as execCb } from "node:child_process";
+import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { createLogger } from "../core/logger.js";
 
-const execAsync = promisify(execCb);
+const execAsync = promisify(exec);
 const log = createLogger("daemon:service");
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+/** Detected operating system platform for service integration. */
 export type ServicePlatform = "macos" | "linux" | "unsupported";
 
+/** Configuration for installing the daemon as a system service. */
 export interface ServiceConfig {
   /** Reverse-domain identifier, e.g. "ai.isotopes.daemon" */
   name: string;
@@ -37,6 +39,7 @@ export interface ServiceConfig {
 // Platform detection
 // ---------------------------------------------------------------------------
 
+/** Detect the current operating system for service integration. */
 export function getPlatform(): ServicePlatform {
   switch (os.platform()) {
     case "darwin":
@@ -131,6 +134,12 @@ WantedBy=default.target
 // ServiceManager
 // ---------------------------------------------------------------------------
 
+/**
+ * ServiceManager — installs and manages the daemon as a system service.
+ *
+ * Supports macOS launchd (plist) and Linux systemd (user unit). Provides
+ * install, uninstall, enable, disable, and status-check operations.
+ */
 export class ServiceManager {
   private platform: ServicePlatform;
 
@@ -173,8 +182,8 @@ export class ServiceManager {
     // Disable first (best-effort)
     try {
       await this.disable(name);
-    } catch {
-      // may not be enabled
+    } catch (err) {
+      log.debug(`Could not disable service before uninstall (may not be enabled):`, err);
     }
 
     if (this.platform === "macos") {

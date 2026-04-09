@@ -12,6 +12,9 @@ import type {
   SessionStoreConfig,
   SessionConfig,
 } from "./types.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("session-store");
 
 interface StoredSession extends Session {
   messages?: Message[];
@@ -42,10 +45,11 @@ const DEFAULT_TTL_SECONDS = 86_400;
 const DEFAULT_CLEANUP_INTERVAL_SECONDS = 3_600;
 
 /**
- * DefaultSessionStore — in-memory session storage with file persistence.
+ * DefaultSessionStore — in-memory {@link SessionStore} with file persistence.
  *
- * Sessions are kept in memory for fast access. Message history is
- * persisted to disk as JSONL files for recovery.
+ * Sessions are kept in memory for fast access. Message histories are
+ * persisted to disk as JSONL files. Supports automatic TTL-based cleanup
+ * of expired sessions.
  */
 export class DefaultSessionStore implements SessionStore {
   private sessions = new Map<string, StoredSession>();
@@ -53,6 +57,9 @@ export class DefaultSessionStore implements SessionStore {
   private config: Required<SessionStoreConfig>;
   private sessionConfig: Required<SessionConfig>;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  private indexDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Debounce interval for index persistence on addMessage (ms) */
+  private static readonly INDEX_DEBOUNCE_MS = 1_000;
 
   constructor(config: SessionStoreConfig) {
     this.config = {
@@ -131,9 +138,13 @@ export class DefaultSessionStore implements SessionStore {
     session.messages!.push(message);
     session.lastActiveAt = new Date();
 
-    // Append message to JSONL file
+    // Append message to JSONL file (critical path — always await)
     await this.appendMessage(sessionId, message);
-    await this.persistIndex();
+
+    // Index persistence is non-critical here (only updates lastActiveAt);
+    // the message itself is already durable in the JSONL file.
+    // Use debounced write to avoid excessive I/O on rapid message bursts.
+    this.debouncedPersistIndex();
   }
 
   async getMessages(sessionId: string): Promise<Message[]> {
@@ -157,8 +168,8 @@ export class DefaultSessionStore implements SessionStore {
     // Remove persisted files
     try {
       await fs.rm(this.transcriptFile(sessionId), { force: true });
-    } catch {
-      // Ignore if doesn't exist
+    } catch (err) {
+      log.debug(`Could not remove transcript file for session ${sessionId}`, err);
     }
   }
 
@@ -192,9 +203,28 @@ export class DefaultSessionStore implements SessionStore {
       }
     }
 
+    if (expired.length === 0) return expired;
+
+    // Remove from in-memory maps first (avoids per-session index writes)
     for (const id of expired) {
-      await this.delete(id);
+      const session = this.sessions.get(id);
+      if (session?.metadata?.key) {
+        this.keyIndex.delete(session.metadata.key);
+      }
+      this.sessions.delete(id);
     }
+
+    // Persist index once for the batch, then clean up transcript files in parallel
+    await this.persistIndex();
+    await Promise.allSettled(
+      expired.map(async (id) => {
+        try {
+          await fs.rm(this.transcriptFile(id), { force: true });
+        } catch (err) {
+          log.debug(`Could not remove transcript file for session ${id}`, err);
+        }
+      }),
+    );
 
     return expired;
   }
@@ -230,6 +260,10 @@ export class DefaultSessionStore implements SessionStore {
    */
   destroy(): void {
     this.stopCleanupTimer();
+    if (this.indexDebounceTimer) {
+      clearTimeout(this.indexDebounceTimer);
+      this.indexDebounceTimer = null;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -264,6 +298,20 @@ export class DefaultSessionStore implements SessionStore {
       this.indexFile(),
       JSON.stringify(index, null, 2),
     );
+  }
+
+  /**
+   * Debounced index persistence — coalesces rapid writes (e.g. during
+   * message bursts) into a single disk write.
+   */
+  private debouncedPersistIndex(): void {
+    if (this.indexDebounceTimer) {
+      clearTimeout(this.indexDebounceTimer);
+    }
+    this.indexDebounceTimer = setTimeout(() => {
+      this.indexDebounceTimer = null;
+      void this.persistIndex();
+    }, DefaultSessionStore.INDEX_DEBOUNCE_MS);
   }
 
   private async appendMessage(sessionId: string, message: Message): Promise<void> {
@@ -304,7 +352,8 @@ export class DefaultSessionStore implements SessionStore {
         });
       }
       return messages;
-    } catch {
+    } catch (err) {
+      log.debug(`Could not load messages for session ${sessionId}`, err);
       return [];
     }
   }
@@ -323,7 +372,8 @@ export class DefaultSessionStore implements SessionStore {
     let raw: string;
     try {
       raw = await fs.readFile(this.indexFile(), "utf-8");
-    } catch {
+    } catch (err) {
+      log.debug("No session index found (first run or empty store)", err);
       return;
     }
 

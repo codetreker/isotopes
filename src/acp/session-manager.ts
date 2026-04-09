@@ -23,9 +23,30 @@ import type {
  */
 export class AcpSessionManager {
   private sessions: Map<string, AcpSession> = new Map();
+  private threadIndex: Map<string, string> = new Map(); // threadId → sessionId
   private listeners: AcpSessionCallback[] = [];
 
   constructor(private config: AcpConfig) {}
+
+  // -------------------------------------------------------------------------
+  // Cleanup
+  // -------------------------------------------------------------------------
+
+  /**
+   * Remove terminated sessions from memory.
+   * Returns the number of sessions removed.
+   */
+  purgeTerminated(): number {
+    let count = 0;
+    for (const [id, session] of this.sessions) {
+      if (session.status === "terminated") {
+        if (session.threadId) this.threadIndex.delete(session.threadId);
+        this.sessions.delete(id);
+        count++;
+      }
+    }
+    return count;
+  }
 
   // -------------------------------------------------------------------------
   // Accessors
@@ -45,7 +66,6 @@ export class AcpSessionManager {
    * Validates that the agent is in the allowedAgents list (if configured).
    */
   createSession(agentId: string, threadId?: string): AcpSession {
-    // Validate agent is allowed
     if (
       this.config.allowedAgents &&
       this.config.allowedAgents.length > 0 &&
@@ -68,6 +88,7 @@ export class AcpSessionManager {
     };
 
     this.sessions.set(session.id, session);
+    if (threadId) this.threadIndex.set(threadId, session.id);
     this.notify(session, "created");
 
     return session;
@@ -80,12 +101,8 @@ export class AcpSessionManager {
 
   /** Find the session bound to a given Discord thread ID. */
   getSessionByThread(threadId: string): AcpSession | undefined {
-    for (const session of this.sessions.values()) {
-      if (session.threadId === threadId) {
-        return session;
-      }
-    }
-    return undefined;
+    const sessionId = this.threadIndex.get(threadId);
+    return sessionId ? this.sessions.get(sessionId) : undefined;
   }
 
   /**
@@ -100,7 +117,12 @@ export class AcpSessionManager {
     if (!session) return undefined;
 
     if (update.status !== undefined) session.status = update.status;
-    if (update.threadId !== undefined) session.threadId = update.threadId;
+    if (update.threadId !== undefined) {
+      // Update thread index
+      if (session.threadId) this.threadIndex.delete(session.threadId);
+      if (update.threadId) this.threadIndex.set(update.threadId, sessionId);
+      session.threadId = update.threadId;
+    }
     if (update.agentId !== undefined) session.agentId = update.agentId;
     session.lastActivityAt = new Date();
 
@@ -151,11 +173,12 @@ export class AcpSessionManager {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
 
+    const now = new Date();
     session.history.push({
       ...message,
-      timestamp: new Date(),
+      timestamp: now,
     });
-    session.lastActivityAt = new Date();
+    session.lastActivityAt = now;
 
     this.notify(session, "updated");
     return true;
@@ -173,7 +196,7 @@ export class AcpSessionManager {
     this.listeners.push(callback);
     return () => {
       const idx = this.listeners.indexOf(callback);
-      if (idx >= 0) this.listeners.splice(idx, 1);
+      if (idx !== -1) this.listeners.splice(idx, 1);
     };
   }
 

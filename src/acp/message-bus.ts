@@ -58,6 +58,9 @@ export type MessageHandler = (message: AgentMessage) => void | Promise<void>;
  * - Pending-message queue per agent/session
  * - Optional AcpSessionManager integration for session-aware routing
  */
+/** Maximum number of pending messages per agent/session before oldest are dropped. */
+const MAX_PENDING_MESSAGES = 100;
+
 export class AgentMessageBus {
   /** agentId → handlers */
   private agentHandlers: Map<string, MessageHandler[]> = new Map();
@@ -153,7 +156,7 @@ export class AgentMessageBus {
       const list = this.agentHandlers.get(agentId);
       if (!list) return;
       const idx = list.indexOf(handler);
-      if (idx >= 0) list.splice(idx, 1);
+      if (idx !== -1) list.splice(idx, 1);
       if (list.length === 0) this.agentHandlers.delete(agentId);
     };
   }
@@ -174,7 +177,7 @@ export class AgentMessageBus {
       const list = this.sessionHandlers.get(sessionId);
       if (!list) return;
       const idx = list.indexOf(handler);
-      if (idx >= 0) list.splice(idx, 1);
+      if (idx !== -1) list.splice(idx, 1);
       if (list.length === 0) this.sessionHandlers.delete(sessionId);
     };
   }
@@ -202,9 +205,12 @@ export class AgentMessageBus {
     const handlers = this.agentHandlers.get(agentId);
 
     if (!handlers || handlers.length === 0) {
-      // Queue as pending
+      // Queue as pending (capped to avoid unbounded growth)
       const pending = this.pendingByAgent.get(agentId) ?? [];
       pending.push(message);
+      if (pending.length > MAX_PENDING_MESSAGES) {
+        pending.splice(0, pending.length - MAX_PENDING_MESSAGES);
+      }
       this.pendingByAgent.set(agentId, pending);
 
       return {
@@ -227,9 +233,12 @@ export class AgentMessageBus {
     const handlers = this.sessionHandlers.get(sessionId);
 
     if (!handlers || handlers.length === 0) {
-      // Queue as pending
+      // Queue as pending (capped to avoid unbounded growth)
       const pending = this.pendingBySession.get(sessionId) ?? [];
       pending.push(message);
+      if (pending.length > MAX_PENDING_MESSAGES) {
+        pending.splice(0, pending.length - MAX_PENDING_MESSAGES);
+      }
       this.pendingBySession.set(sessionId, pending);
 
       return {

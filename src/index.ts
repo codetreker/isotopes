@@ -1,6 +1,14 @@
-// src/index.ts — Isotopes public API
-// Main entry point for library usage.
+/**
+ * @module isotopes
+ *
+ * Public API for the Isotopes agent framework.
+ *
+ * This module re-exports all types, classes, and functions that constitute
+ * the library's public surface. Consumers should import from `"isotopes"`
+ * (this entry point) rather than reaching into internal paths.
+ */
 
+/** Semantic version of the Isotopes library. */
 export const VERSION = "0.1.0";
 
 // ---------------------------------------------------------------------------
@@ -9,6 +17,7 @@ export const VERSION = "0.1.0";
 
 export type {
   Message,
+  MessageContentBlock,
   Tool,
   AgentEvent,
   ProviderConfig,
@@ -17,8 +26,13 @@ export type {
   AgentCore,
   AgentManager,
   Session,
+  SessionMetadata,
+  SessionConfig,
   SessionStore,
+  SessionStoreConfig,
   Transport,
+  CompactionMode,
+  CompactionConfig,
   GuildConfig,
   DiscordAccountConfig,
   ChannelsConfig,
@@ -29,6 +43,8 @@ export type {
   ThreadBindingConfig,
   ThreadBinding,
 } from "./core/types.js";
+
+export { textContent, messageContentToPlainText } from "./core/types.js";
 
 // ---------------------------------------------------------------------------
 // Core implementations
@@ -62,8 +78,6 @@ export {
   loadConfig,
   toAgentConfig,
   getDiscordToken,
-  getDiscordGuildConfig,
-  isRequireMention,
   resolveAcpConfig,
   resolveSandboxConfigFromFile,
 } from "./core/config.js";

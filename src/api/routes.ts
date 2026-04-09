@@ -2,23 +2,25 @@
 // Implements GET/POST/PUT/DELETE endpoints for sessions, cron, config, and status.
 
 import type { ServerResponse } from "node:http";
+
+import { VERSION } from "../index.js";
 import type { AcpSessionManager } from "../acp/session-manager.js";
 import type { CronScheduler, CronJobInput } from "../automation/cron-job.js";
 import type { ConfigReloader } from "../workspace/config-reloader.js";
-import type { ApiRequest } from "./middleware.js";
-import { sendJson, sendError, handleRouteError } from "./middleware.js";
-import { VERSION } from "../index.js";
+import { sendJson, sendError, handleRouteError, type ApiRequest } from "./middleware.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+/** Dependencies injected into route handlers. */
 export interface RouteDeps {
   sessionManager: AcpSessionManager;
   cronScheduler: CronScheduler;
   configReloader?: ConfigReloader;
 }
 
+/** Handler function for a matched API route. */
 export type RouteHandler = (
   req: ApiRequest,
   res: ServerResponse,

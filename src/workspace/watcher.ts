@@ -11,6 +11,7 @@ const log = createLogger("watcher");
 // Types
 // ---------------------------------------------------------------------------
 
+/** Configuration for the file system watcher. */
 export interface WatcherConfig {
   /** Paths to watch (files or directories) */
   paths: string[];
@@ -22,6 +23,7 @@ export interface WatcherConfig {
   debounceMs?: number;
 }
 
+/** A detected file system change event. */
 export interface FileChange {
   /** Absolute path to the changed file */
   path: string;
@@ -31,17 +33,25 @@ export interface FileChange {
   timestamp: Date;
 }
 
+/** Callback invoked with batched file changes after debouncing. */
 export type ChangeHandler = (changes: FileChange[]) => void | Promise<void>;
 
 // ---------------------------------------------------------------------------
 // Pattern matching helpers
 // ---------------------------------------------------------------------------
 
+/** Cache for compiled glob patterns to avoid re-creating RegExp on every event. */
+const globCache = new Map<string, RegExp>();
+
 /**
  * Convert a simple glob pattern to a RegExp.
  * Supports `*` (any chars except path sep) and `**` (any chars including path sep).
+ * Results are cached for repeated calls with the same pattern.
  */
 export function globToRegExp(pattern: string): RegExp {
+  const cached = globCache.get(pattern);
+  if (cached) return cached;
+
   let regExpStr = "";
   let i = 0;
 
@@ -72,7 +82,9 @@ export function globToRegExp(pattern: string): RegExp {
     }
   }
 
-  return new RegExp(`^${regExpStr}$`);
+  const regex = new RegExp(`^${regExpStr}$`);
+  globCache.set(pattern, regex);
+  return regex;
 }
 
 /**
@@ -113,6 +125,13 @@ export function matchesIgnorePatterns(filePath: string, ignorePatterns?: string[
 // WorkspaceWatcher
 // ---------------------------------------------------------------------------
 
+/**
+ * WorkspaceWatcher — watches workspace files for changes and notifies handlers.
+ *
+ * Uses Node.js `fs.watch` with recursive watching. Changes are debounced
+ * and deduplicated (latest change per path wins) before being dispatched
+ * to registered {@link ChangeHandler}s.
+ */
 export class WorkspaceWatcher {
   private watchers: fs.FSWatcher[] = [];
   private handlers: ChangeHandler[] = [];

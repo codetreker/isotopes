@@ -1,6 +1,7 @@
 // src/core/logger.ts — Logging system for Isotopes
 // Provides structured logging with levels, timestamps, and tags.
 
+/** Log severity level. */
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 const LOG_LEVELS: Record<LogLevel, number> = {
@@ -36,8 +37,12 @@ function format(level: LogLevel, tag: string, message: string): string {
 }
 
 /**
- * Logger instance with tag.
- * Create via `createLogger("tag")` or use the default `logger`.
+ * Tagged logger instance.
+ *
+ * Messages are formatted with ISO timestamp, level, and tag:
+ * `[2024-01-15T10:30:00.000Z] [INFO ] [core] message`
+ *
+ * Create via {@link createLogger} or use the default {@link logger}.
  */
 export interface Logger {
   debug(message: string, ...args: unknown[]): void;
@@ -49,6 +54,11 @@ export interface Logger {
 
 /**
  * Create a tagged logger instance.
+ *
+ * Log level is determined by the `LOG_LEVEL` environment variable
+ * (debug, info, warn, error) or `DEBUG=isotopes` for debug output.
+ *
+ * @param tag - Short identifier prepended to every log line (e.g. `"core"`, `"discord"`)
  */
 export function createLogger(tag: string): Logger {
   const minLevel = LOG_LEVELS[getLogLevel()];
@@ -89,15 +99,25 @@ export function createLogger(tag: string): Logger {
 export const logger = createLogger("isotopes");
 
 // ---------------------------------------------------------------------------
-// Pre-configured loggers for core components
+// Pre-configured loggers for core components (lazy-initialized)
 // ---------------------------------------------------------------------------
 
-export const loggers = {
-  core: createLogger("core"),
-  discord: createLogger("discord"),
-  feishu: createLogger("feishu"),
-  agent: createLogger("agent"),
-  session: createLogger("session"),
-  tools: createLogger("tools"),
-  config: createLogger("config"),
-};
+interface LoggerMap {
+  core: Logger;
+  discord: Logger;
+  feishu: Logger;
+  agent: Logger;
+  session: Logger;
+  tools: Logger;
+  config: Logger;
+}
+
+/** Pre-configured loggers for core Isotopes components. Created on first access. */
+export const loggers: LoggerMap = new Proxy({} as Record<string, Logger>, {
+  get(cache, prop: string) {
+    if (!(prop in cache)) {
+      cache[prop] = createLogger(prop);
+    }
+    return cache[prop];
+  },
+}) as unknown as LoggerMap;

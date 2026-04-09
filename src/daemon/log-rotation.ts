@@ -2,7 +2,7 @@
 // Rotates log files when they exceed a configured size, with optional gzip.
 
 import fs from "node:fs/promises";
-import fss from "node:fs";
+import fsSync from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { createLogger } from "../core/logger.js";
@@ -13,6 +13,7 @@ const log = createLogger("daemon:log-rotation");
 // Types
 // ---------------------------------------------------------------------------
 
+/** Configuration for log file rotation. */
 export interface LogRotationConfig {
   /** Maximum file size in bytes before rotation triggers. */
   maxSize: number;
@@ -26,6 +27,12 @@ export interface LogRotationConfig {
 // LogRotator
 // ---------------------------------------------------------------------------
 
+/**
+ * LogRotator — rotates daemon log files when they exceed a configured size.
+ *
+ * Supports numbered rotation slots (`.1` through `.N`) and optional gzip
+ * compression. Oldest files are deleted to stay within {@link LogRotationConfig.maxFiles}.
+ */
 export class LogRotator {
   private config: Required<LogRotationConfig>;
 
@@ -156,8 +163,8 @@ export class LogRotator {
   }
 
   private async compressFile(src: string, dst: string): Promise<void> {
-    const input = fss.createReadStream(src);
-    const output = fss.createWriteStream(dst);
+    const input = fsSync.createReadStream(src);
+    const output = fsSync.createWriteStream(dst);
     const gzip = createGzip();
 
     await pipeline(input, gzip, output);

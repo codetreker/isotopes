@@ -1,24 +1,22 @@
 // src/transports/feishu.ts — Feishu (Lark) transport for Isotopes
 // Handles Feishu bot connection via WebSocket, message routing, and response streaming.
-// M2.1: P2P (DM) messages
-// M2.2: Group message handling with @mention gating
-// M2.3: Per-group requireMention configuration
-// M2.4: Bindings integration for agent routing
 
 import * as lark from "@larksuiteoapi/node-sdk";
-import type {
-  AgentInstance,
-  AgentManager,
-  Binding,
-  BindingPeer,
-  ChannelsConfig,
-  Message,
-  SessionStore,
-  Transport,
+import {
+  textContent,
+  type AgentInstance,
+  type AgentManager,
+  type Binding,
+  type BindingPeer,
+  type ChannelsConfig,
+  type Message,
+  type SessionStore,
+  type Transport,
 } from "../core/types.js";
-import { textContent } from "../core/types.js";
 import { resolveBinding } from "../core/bindings.js";
 import { loggers } from "../core/logger.js";
+import { runAgentLoop } from "../core/agent-runner.js";
+import { buildSessionKey, type SessionScope } from "../core/session-keys.js";
 
 const log = loggers.feishu;
 
@@ -93,32 +91,16 @@ export function isBotMentioned(
 /**
  * Determine whether the bot should respond to a group message based on config.
  *
- * Looks up `channels.feishu.groups[chatId].requireMention`:
- *   - `requireMention: false` → respond to all messages in that group
- *   - `requireMention: true` (default) → only respond when @mentioned
- *   - No config → default to requiring @mention
+ * If the group has `requireMention: false`, responds to all messages.
+ * Otherwise (default), only responds when @mentioned.
  */
 export function shouldRespondToGroupMessage(
   chatId: string,
   isMentioned: boolean,
   channels?: ChannelsConfig,
-  _accountId?: string,
 ): boolean {
-  if (!channels?.feishu?.groups) {
-    return isMentioned;
-  }
-
-  const groupConfig = channels.feishu.groups[chatId];
-  if (!groupConfig) {
-    return isMentioned;
-  }
-
-  const requireMention = groupConfig.requireMention ?? true;
-  if (!requireMention) {
-    return true;
-  }
-
-  return isMentioned;
+  const requireMention = channels?.feishu?.groups?.[chatId]?.requireMention ?? true;
+  return !requireMention || isMentioned;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,14 +119,15 @@ export function buildFeishuSessionKey(
   agentId: string,
   chatType: "p2p" | "group" = "p2p",
 ): string {
-  const scope = chatType === "group" ? "group" : "dm";
-  return `feishu:${botId}:${scope}:${scopeId}:${agentId}`;
+  const scope: SessionScope = chatType === "group" ? "group" : "dm";
+  return buildSessionKey("feishu", botId, scope, scopeId, agentId);
 }
 
 // ---------------------------------------------------------------------------
 // Config & types
 // ---------------------------------------------------------------------------
 
+/** Configuration for the Feishu (Lark) transport. */
 export interface FeishuTransportConfig {
   /** Feishu app ID from Developer Console */
   appId: string;
@@ -166,7 +149,7 @@ export interface FeishuTransportConfig {
   agentBindings?: Record<string, string>;
 }
 
-/** Shape of the im.message.receive_v1 event data from the Feishu SDK */
+/** Shape of the `im.message.receive_v1` event data from the Feishu SDK. */
 export interface FeishuMessageEvent {
   sender: {
     sender_id?: {
@@ -239,11 +222,10 @@ export function resolveAgentId(
 // ---------------------------------------------------------------------------
 
 /**
- * FeishuTransport — connects agents to Feishu via WebSocket long connection.
+ * FeishuTransport — connects agents to Feishu (Lark) via WebSocket.
  *
- * M2.1: WebSocket connection, P2P (DM) text messages
- * M2.2: Group message handling with @mention gating
- * M2.3: Per-group requireMention configuration
+ * Supports P2P (DM) and group messages with @mention gating, per-group
+ * `requireMention` configuration, and binding-based agent routing.
  */
 export class FeishuTransport implements Transport {
   private config: FeishuTransportConfig;
@@ -317,7 +299,7 @@ export class FeishuTransport implements Transport {
     if (message.chat_type === "group") {
       const botOpenId = this.config.botOpenId;
       const mentioned = botOpenId ? isBotMentioned(message.mentions, botOpenId) : false;
-      if (!shouldRespondToGroupMessage(message.chat_id, mentioned, this.config.channels, this.config.accountId)) {
+      if (!shouldRespondToGroupMessage(message.chat_id, mentioned, this.config.channels)) {
         log.debug("Ignoring group message: bot not mentioned and requireMention is enabled");
         return;
       }
@@ -410,32 +392,18 @@ export class FeishuTransport implements Transport {
     sessionId: string,
   ): Promise<void> {
     try {
-      let responseText = "";
-
-      for await (const event of agent.prompt(input)) {
-        if (event.type === "text_delta") {
-          responseText += event.text;
-        } else if (event.type === "agent_end") {
-          // Store final assistant message
-          if (responseText) {
-            await this.config.sessionStore.addMessage(sessionId, {
-              role: "assistant",
-              content: textContent(responseText),
-              timestamp: Date.now(),
-            });
-          }
-
-          if (event.stopReason === "error") {
-            const errorMsg = event.errorMessage ?? "Unknown agent error";
-            log.error(`Agent ended with error: ${errorMsg}`);
-            responseText = `Error: ${errorMsg}`;
-          }
-        }
-      }
+      const { responseText, errorMessage } = await runAgentLoop({
+        agent,
+        input,
+        sessionId,
+        sessionStore: this.config.sessionStore,
+        log,
+      });
 
       // Send reply to Feishu
-      if (responseText) {
-        await this.sendTextMessage(chatId, responseText);
+      const replyText = errorMessage ? `Error: ${errorMessage}` : responseText;
+      if (replyText) {
+        await this.sendTextMessage(chatId, replyText);
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
