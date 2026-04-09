@@ -259,8 +259,7 @@ agents:
 
 ## Future Work (not in M10)
 
-- Diff preview tool (show changes before applying)
-- **Subagent abort capability** — ability to interrupt a subagent running in a thread from parent channel (e.g., `/abort <thread-id>` command or "stop" message trigger)
+See [BACKLOG.md](./BACKLOG.md) for detailed backlog items.
 - Approval workflow (require human approval for self-iteration)
 - Metrics tracking (what iterations were made, how often)
 - Rollback command (restore from backup)
