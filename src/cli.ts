@@ -46,6 +46,8 @@ import { seedWorkspaceTemplates } from "./workspace/templates.js";
 import { reconcileWorkspaceState } from "./workspace/state.js";
 import { DaemonProcess } from "./daemon/process.js";
 import { ServiceManager, getPlatform, type ServiceConfig } from "./daemon/service.js";
+import { ApiServer } from "./api/server.js";
+import { CronScheduler } from "./automation/cron-job.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -361,10 +363,16 @@ async function main() {
   hotReload.start();
   logger.info(`Hot-reload enabled for ${config.agents.length} agent(s)`);
 
+  // Shared instances for Discord transport and API server
+  const acpConfig = resolveAcpConfig(config.acp);
+  const acpSessionManager = new AcpSessionManager(
+    acpConfig ?? { enabled: false, backend: "acpx", defaultAgent: config.agents[0]?.id ?? "default" },
+  );
+  const cronScheduler = new CronScheduler();
+
   // Start Discord transport if configured
   if (config.discord) {
     const token = getDiscordToken(config.discord);
-    const acpConfig = resolveAcpConfig(config.acp);
 
     // Create session store per agent (sessions live in workspace)
     const sessionStores = new Map<string, DefaultSessionStore>();
@@ -424,7 +432,6 @@ async function main() {
 
     if (threadBindings?.enabled) {
       if (acpConfig) {
-        const acpSessionManager = new AcpSessionManager(acpConfig);
         discord.getThreadBindingManager().attachAcpSessionManager(acpSessionManager, {
           spawnAcpSessions: threadBindings.spawnAcpSessions ?? false,
         });
@@ -444,6 +451,15 @@ async function main() {
     logger.info("Discord transport started");
   }
 
+  // Start API server (dashboard + REST API)
+  const apiServer = new ApiServer(
+    { port: 2712 },
+    acpSessionManager,
+    cronScheduler,
+  );
+  await apiServer.start();
+  logger.info("Dashboard available at http://127.0.0.1:2712/dashboard");
+
   // Keep process alive
   logger.info("Running... Press Ctrl+C to stop");
 
@@ -451,12 +467,14 @@ async function main() {
   process.on("SIGINT", async () => {
     logger.info("Shutting down...");
     hotReload.stop();
+    await apiServer.stop();
     process.exit(0);
   });
 
   process.on("SIGTERM", async () => {
     logger.info("Shutting down...");
     hotReload.stop();
+    await apiServer.stop();
     process.exit(0);
   });
 }
