@@ -50,6 +50,14 @@ export interface ProviderConfigFile {
   headers?: Record<string, string>;
 }
 
+/** Heartbeat configuration in config file */
+export interface HeartbeatConfigFile {
+  /** Enable heartbeat for this agent. Default: false */
+  enabled?: boolean;
+  /** Interval in seconds between heartbeat triggers. Default: 300 (5 min) */
+  intervalSeconds?: number;
+}
+
 /** Agent configuration in config file */
 export interface AgentConfigFile {
   id: string;
@@ -59,8 +67,14 @@ export interface AgentConfigFile {
   sandbox?: SandboxConfigFile;
   /** Self-iteration configuration (M10) */
   selfIteration?: SelfIterationConfigFile;
+  /** Heartbeat configuration (#191) */
+  heartbeat?: HeartbeatConfigFile;
   /** Additional workspace paths allowed for subagent cwd */
   allowedWorkspaces?: string[];
+  /** Heartbeat interval in milliseconds (0 = disabled). */
+  heartbeatInterval?: number;
+  /** Custom heartbeat prompt (overrides the default). */
+  heartbeatPrompt?: string;
 }
 
 /** Self-iteration configuration in config file */
@@ -680,6 +694,8 @@ export function toAgentConfig(
     provider: provider as ProviderConfig | undefined,
     compaction,
     sandbox,
+    heartbeatInterval: agent.heartbeatInterval,
+    heartbeatPrompt: agent.heartbeatPrompt,
   };
 }
 
