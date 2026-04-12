@@ -390,15 +390,20 @@ export class AcpxBackend {
         break;
     }
 
-    const postAgentArgs: string[] = ["exec", "--file", "-"];
-
+    // --model, --max-turns, --timeout are global flags — must go BEFORE agent subcommand
     if (options.model) {
-      postAgentArgs.push("--model", options.model);
+      preAgentArgs.push("--model", options.model);
     }
 
     if (options.maxTurns !== undefined) {
-      postAgentArgs.push("--max-turns", String(options.maxTurns));
+      preAgentArgs.push("--max-turns", String(options.maxTurns));
     }
+
+    if (options.timeout !== undefined) {
+      preAgentArgs.push("--timeout", String(options.timeout));
+    }
+
+    const postAgentArgs: string[] = ["exec", "--file", "-"];
 
     return { preAgentArgs, postAgentArgs };
   }
