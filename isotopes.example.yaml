@@ -117,7 +117,6 @@ discord:
 
   threadBindings:
     enabled: true
-    spawnAcpSessions: true
     # autoUnbindOnComplete: true
     # sendFarewell: false
     # farewellMessage: "Bye!"
@@ -173,9 +172,9 @@ discord:
 #         id: "1480866703880487034"
 
 # =============================================================================
-# ACP — Agent Communication Protocol (sub-agent spawning)
+# Subagent — Claude Agent SDK backend for sub-agent spawning
 # =============================================================================
-acp:
+subagent:
   enabled: true
   defaultAgent: main
   allowedAgents:
@@ -196,11 +195,6 @@ acp:
   #   enableShell: false              # appends Bash to allowedTools
   #   useThread: true                 # spawn Discord thread for subagent output
   #   showToolCalls: true
-  # persistence:                      # #195
-  #   enabled: false
-  #   dataDir: ${ISOTOPES_HOME}/acp-sessions
-  #   ttl: 86400
-  #   cleanupInterval: 3600
 
 # =============================================================================
 # CRON — channel-level scheduled jobs (per-agent cron lives under agents.<id>.cron)
