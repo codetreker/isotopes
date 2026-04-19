@@ -18,6 +18,8 @@ export interface SandboxExecOptions {
   workspacePath?: string;
   /** Execution timeout in milliseconds */
   timeout?: number;
+  /** Additional host paths to mount read-only inside the container */
+  allowedWorkspaces?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -55,13 +57,31 @@ export class SandboxExecutor {
     command: string[],
     options?: SandboxExecOptions,
   ): Promise<ExecResult> {
-    const container = await this.ensureContainer(agentId, options?.workspacePath);
+    const container = await this.ensureContainer(agentId, options?.workspacePath, options?.allowedWorkspaces);
 
     if (options?.timeout) {
       return this.execWithTimeout(container.id, command, options.timeout);
     }
 
     return this.containerManager.exec(container.id, command);
+  }
+
+  /**
+   * Build the host-side argv for running `command` inside the agent's
+   * container via `docker exec`. Ensures the container exists.
+   *
+   * Used by background-process spawning: the caller spawns this argv as a
+   * regular host child process and tracks the ChildProcess handle, getting
+   * stdout/stderr pipes and SIGTERM-based kill for free (docker exec defaults
+   * to --sig-proxy=true, so signals reach the container PID).
+   */
+  async buildExecArgv(
+    agentId: string,
+    command: string[],
+    options?: SandboxExecOptions,
+  ): Promise<string[]> {
+    const container = await this.ensureContainer(agentId, options?.workspacePath, options?.allowedWorkspaces);
+    return this.containerManager.buildExecArgv(container.id, command);
   }
 
   /**
@@ -120,6 +140,7 @@ export class SandboxExecutor {
   private async ensureContainer(
     agentId: string,
     workspacePath?: string,
+    allowedWorkspaces?: string[],
   ): Promise<ContainerInfo> {
     const existing = this.containers.get(agentId);
 
@@ -153,6 +174,7 @@ export class SandboxExecutor {
       containerName,
       workspace,
       access,
+      allowedWorkspaces ?? [],
     );
 
     await this.containerManager.start(container.id);

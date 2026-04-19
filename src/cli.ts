@@ -15,6 +15,7 @@ import {
   loadConfig,
   toAgentConfig,
   resolveSubagentConfig,
+  resolveSandboxConfigFromFile,
 } from "./core/config.js";
 import { initSubagentBackend } from "./tools/subagent.js";
 import { PiMonoCore } from "./core/pi-mono.js";
@@ -32,6 +33,8 @@ import {
 } from "./core/tools.js";
 import { createReplyReactTools, LazyTransportContext } from "./tools/reply-react.js";
 import { createExecTools, ProcessRegistry } from "./tools/exec.js";
+import { ContainerManager, SandboxExecutor, SandboxFs, shouldSandbox, type FsLike } from "./sandbox/index.js";
+import * as nodeFs from "node:fs/promises";
 import {
   getConfigPath,
   getIsotopesHome,
@@ -795,8 +798,38 @@ async function main() {
   const processRegistries = new Map<string, ProcessRegistry>();
   const isSingleAgent = config.agents.length === 1;
 
-  for (const agentFile of config.agents) {
-    const agentConfig = toAgentConfig(agentFile, config.agentDefaults, config.provider, config.tools, config.compaction, config.sandbox);
+  // Build a single SandboxExecutor when sandboxing is enabled anywhere.
+  // The agents-level sandbox config (agents.defaults.sandbox or top-level
+  // sandbox) supplies docker/workspaceAccess; per-agent `sandbox` is a
+  // partial override (typically `mode: "off"`). The runtime maintains one
+  // global ContainerManager — per-agent docker overrides are rejected at
+  // config-load time.
+  let sandboxExecutor: SandboxExecutor | undefined;
+  const baseSandboxFile = config.agentDefaults?.sandbox ?? config.sandbox;
+  const resolvedAgentConfigs = config.agents.map((a) =>
+    toAgentConfig(a, config.agentDefaults, config.provider, config.tools, config.compaction, config.sandbox),
+  );
+  const anySandboxed = resolvedAgentConfigs.some((c) => c.sandbox && c.sandbox.mode !== "off");
+  if (anySandboxed) {
+    if (!baseSandboxFile) {
+      throw new Error(
+        "Sandbox is enabled for at least one agent but no agents-level sandbox config was found. " +
+          "Define `agents.defaults.sandbox` or top-level `sandbox` with a docker config.",
+      );
+    }
+    const baseSandbox = resolveSandboxConfigFromFile("<agents-defaults>", undefined, baseSandboxFile);
+    const dockerConfig = baseSandbox?.docker;
+    if (!dockerConfig) {
+      throw new Error("Sandbox is enabled but no docker config could be resolved");
+    }
+    const containerManager = new ContainerManager(dockerConfig);
+    sandboxExecutor = new SandboxExecutor(containerManager, baseSandbox!);
+    logger.info(`Sandbox executor initialized (image: ${dockerConfig.image})`);
+  }
+
+  for (let agentIdx = 0; agentIdx < config.agents.length; agentIdx++) {
+    const agentFile = config.agents[agentIdx];
+    const agentConfig = resolvedAgentConfigs[agentIdx];
 
     // Create per-agent ProcessRegistry for CLI tool isolation (#289)
     const processRegistry = new ProcessRegistry();
@@ -840,6 +873,13 @@ async function main() {
     const toolRegistry = new ToolRegistry();
     const subagentEnabled = config.subagent?.enabled === true;
     const agentAllowedWorkspaces = agentFile.allowedWorkspaces ?? [];
+
+    // fsImpl is the single decision point for "host fs" vs. "sandbox fs".
+    // Tools depend only on the FsLike type and never branch on sandbox state.
+    const fsImpl: FsLike = sandboxExecutor && agentConfig.sandbox && shouldSandbox(agentConfig.sandbox, false)
+      ? new SandboxFs(sandboxExecutor, agentConfig.id)
+      : nodeFs;
+
     const workspaceTools = createWorkspaceToolsWithGuards(
       workspacePath,
       agentConfig.toolSettings,
@@ -847,6 +887,7 @@ async function main() {
       agentAllowedWorkspaces,
       agentConfig.codingMode,
       config.subagent?.maxTurns,
+      fsImpl,
     );
 
     // Apply tool policy (allow/deny) before registration
@@ -864,7 +905,15 @@ async function main() {
 
     // Register exec/process tools (shared registry across agents)
     if (resolvedToolGuards.cli) {
-      const execTools = createExecTools({ cwd: workspacePath, registry: processRegistry });
+      const execTools = createExecTools({
+        cwd: workspacePath,
+        registry: processRegistry,
+        sandboxExecutor,
+        agentId: agentConfig.id,
+        isMainAgent: false,
+        agentSandboxConfig: agentConfig.sandbox,
+        allowedWorkspaces: agentAllowedWorkspaces,
+      });
       const filteredExecTools = applyToolPolicy(execTools, agentConfig.toolSettings);
       for (const { tool, handler } of filteredExecTools) {
         toolRegistry.register(tool, handler);
@@ -1138,6 +1187,15 @@ async function main() {
       registry.clear();
     }
 
+    // Stop and remove sandbox containers
+    if (sandboxExecutor) {
+      try {
+        await sandboxExecutor.cleanup();
+      } catch (err) {
+        logger.warn(`Sandbox cleanup error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     process.exit(0);
   });
 
@@ -1160,6 +1218,15 @@ async function main() {
     // Kill orphaned background processes (#286, #289)
     for (const registry of processRegistries.values()) {
       registry.clear();
+    }
+
+    // Stop and remove sandbox containers
+    if (sandboxExecutor) {
+      try {
+        await sandboxExecutor.cleanup();
+      } catch (err) {
+        logger.warn(`Sandbox cleanup error: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     process.exit(0);

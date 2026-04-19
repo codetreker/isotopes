@@ -56,7 +56,8 @@ export class ContainerManager {
    * Create a new container with the workspace mounted.
    *
    * @param name - Container name (must be unique)
-   * @param workspacePath - Host path to mount as /workspace
+   * @param workspacePath - Host path to mount; mounted at the same path
+   *   inside the container so absolute host paths resolve identically.
    * @param access - Mount access level (rw or ro)
    * @returns ContainerInfo for the created container
    */
@@ -64,8 +65,9 @@ export class ContainerManager {
     name: string,
     workspacePath: string,
     access: WorkspaceAccess,
+    allowedWorkspaces: string[] = [],
   ): Promise<ContainerInfo> {
-    const args = this.buildCreateArgs(name, workspacePath, access);
+    const args = this.buildCreateArgs(name, workspacePath, access, allowedWorkspaces);
 
     const { stdout } = await execFileAsync("docker", args);
     const containerId = stdout.trim();
@@ -119,11 +121,8 @@ export class ContainerManager {
    */
   async exec(containerId: string, command: string[]): Promise<ExecResult> {
     try {
-      const { stdout, stderr } = await execFileAsync("docker", [
-        "exec",
-        containerId,
-        ...command,
-      ]);
+      const argv = this.buildExecArgv(containerId, command);
+      const { stdout, stderr } = await execFileAsync(argv[0], argv.slice(1));
 
       return { exitCode: 0, stdout, stderr };
     } catch (error: unknown) {
@@ -137,6 +136,15 @@ export class ContainerManager {
       }
       throw error;
     }
+  }
+
+  /**
+   * Build the argv to run a command inside the container as a host-side
+   * `docker exec` child process. Used by background-process spawning so that
+   * stdin/stdout/stderr/SIGTERM all flow through the host child handle.
+   */
+  buildExecArgv(containerId: string, command: string[]): string[] {
+    return ["docker", "exec", "-i", containerId, ...command];
   }
 
   /**
@@ -196,13 +204,23 @@ export class ContainerManager {
     name: string,
     workspacePath: string,
     access: WorkspaceAccess,
+    allowedWorkspaces: string[],
   ): string[] {
-    const args: string[] = ["create", "--name", name];
+    const args: string[] = ["create", "--name", name, "--init"];
 
-    // Workspace volume mount
+    // Workspace volume mount — mounted at the same host path inside the
+    // container so that absolute paths from the host resolve identically
+    // (no /workspace ↔ host path translation needed in the fs bridge).
     const mountSuffix = access === "ro" ? ":ro" : "";
-    args.push("-v", `${workspacePath}:/workspace${mountSuffix}`);
-    args.push("-w", "/workspace");
+    args.push("-v", `${workspacePath}:${workspacePath}${mountSuffix}`);
+    args.push("-w", workspacePath);
+
+    // Additional read-only workspace mounts (parity with allowedWorkspaces
+    // file-tool access).
+    for (const ws of allowedWorkspaces) {
+      if (ws === workspacePath) continue;
+      args.push("-v", `${ws}:${ws}:ro`);
+    }
 
     // Network mode
     if (this.config.network) {
@@ -222,6 +240,24 @@ export class ContainerManager {
     }
     if (this.config.memoryLimit) {
       args.push("--memory", this.config.memoryLimit);
+    }
+    if (this.config.pidsLimit !== undefined && this.config.pidsLimit > 0) {
+      args.push("--pids-limit", String(this.config.pidsLimit));
+    }
+
+    // Linux capability hardening
+    if (this.config.capDrop) {
+      for (const cap of this.config.capDrop) {
+        args.push("--cap-drop", cap);
+      }
+    }
+    if (this.config.capAdd) {
+      for (const cap of this.config.capAdd) {
+        args.push("--cap-add", cap);
+      }
+    }
+    if (this.config.noNewPrivileges !== false) {
+      args.push("--security-opt", "no-new-privileges");
     }
 
     // Image
