@@ -2,11 +2,7 @@
 // src/cli.ts — Isotopes CLI entry point
 // Start agents from configuration file, with daemon lifecycle commands.
 
-// Side-effect import: pulls env from ~/.claude/settings.json into process.env
-// before anything else loads (SDK auth, model overrides). Existing env wins,
-// so .env.local and shell exports stay authoritative.
 import { resolveBundledSkillsDir } from "./skills/bundled-dir.js";
-import "./core/claude-settings-init.js";
 import { parseArgs } from "node:util";
 import path from "node:path";
 import { VERSION } from "./version.js";
@@ -786,6 +782,7 @@ async function main() {
     initSubagentBackend({
       permissionMode: subagentConfig.permissionMode,
       allowedTools: subagentConfig.allowedTools,
+      claude: subagentConfig.claude,
     });
     logger.info(`Subagent backend initialized (permissionMode: ${subagentConfig.permissionMode})`);
 
