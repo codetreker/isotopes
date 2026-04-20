@@ -156,10 +156,19 @@ export interface DiscordTransportConfig {
   agentBindings?: Record<string, string>;
   /** DM access control policy. */
   dm?: {
-    policy?: "disabled" | "open" | "allowlist";
+    policy?: "disabled" | "allowlist";
     allowlist?: string[];
   };
-  /** Channel IDs to listen to (empty = all) */
+  /** Group (guild) access control — parallel to `dm`. Default policy is `"allowlist"`. */
+  group?: {
+    policy?: "disabled" | "allowlist" | "open";
+    channelAllowlist?: string[];
+    guildAllowlist?: string[];
+  };
+  /**
+   * Channel IDs to listen to (empty = all).
+   * @deprecated Use `group.channelAllowlist` with `group.policy: "allowlist"`.
+   */
   channelAllowlist?: string[];
   /** Channels config for per-guild/group settings (e.g. requireMention) */
   channels?: ChannelsConfig;
@@ -306,9 +315,16 @@ export class DiscordTransport implements Transport {
       return;
     }
 
-    // If there's a channel allowlist, only bind threads in allowed channels
-    if (this.config.channelAllowlist?.length) {
-      if (!this.config.channelAllowlist.includes(thread.parentId)) {
+    // If a channel allowlist is configured, only bind threads in allowed channels.
+    const group = this.resolveGroup();
+    if (group.policy === "disabled") {
+      log.debug(`Ignoring thread ${thread.id} — group policy disabled`);
+      return;
+    }
+    if (group.policy === "allowlist") {
+      const channelOk = group.channelAllowlist?.includes(thread.parentId) ?? false;
+      const guildOk = group.guildAllowlist?.includes(thread.guildId) ?? false;
+      if (!channelOk && !guildOk) {
         log.debug(`Ignoring thread ${thread.id} — parent ${thread.parentId} not in allowlist`);
         return;
       }
@@ -551,11 +567,32 @@ export class DiscordTransport implements Transport {
     if (dm?.policy) {
       switch (dm.policy) {
         case "disabled": return false;
-        case "open": return true;
         case "allowlist": return dm.allowlist?.includes(userId) ?? false;
       }
     }
     return false;
+  }
+
+  /** Resolve the effective group config, honoring legacy `channelAllowlist` for back-compat. Default policy is fail-closed `"allowlist"`. */
+  private resolveGroup(): {
+    policy: "disabled" | "allowlist" | "open";
+    channelAllowlist?: string[];
+    guildAllowlist?: string[];
+  } {
+    const g = this.config.group;
+    if (g?.policy || g?.channelAllowlist?.length || g?.guildAllowlist?.length) {
+      return {
+        policy: g.policy ?? "allowlist",
+        channelAllowlist: g.channelAllowlist,
+        guildAllowlist: g.guildAllowlist,
+      };
+    }
+    // Legacy: top-level channelAllowlist implies allowlist policy on channels.
+    const legacy = this.config.channelAllowlist;
+    if (legacy?.length) {
+      return { policy: "allowlist", channelAllowlist: legacy };
+    }
+    return { policy: "allowlist" };
   }
 
   private shouldRespond(msg: DiscordMessage): boolean {
@@ -564,11 +601,13 @@ export class DiscordTransport implements Transport {
       return this.isDmAllowed(msg.author.id);
     }
 
-    // Channel allowlist
-    if (this.config.channelAllowlist?.length) {
-      if (!this.config.channelAllowlist.includes(msg.channelId)) {
-        return false;
-      }
+    // Group (guild) policy
+    const group = this.resolveGroup();
+    if (group.policy === "disabled") return false;
+    if (group.policy === "allowlist") {
+      const channelOk = group.channelAllowlist?.includes(msg.channelId) ?? false;
+      const guildOk = group.guildAllowlist?.includes(msg.guild.id) ?? false;
+      if (!channelOk && !guildOk) return false;
     }
 
     // Check mention-based response using guild config

@@ -21,8 +21,15 @@ export interface GhcProxyAnswers {
   model: string;
 }
 
+export type DmPolicyChoice = "disabled" | "allowlist";
+export type GroupPolicyChoice = "disabled" | "allowlist" | "open";
+
 export interface DiscordAnswers {
   token: string;
+  dmPolicy: DmPolicyChoice;
+  dmUserId?: string;
+  groupPolicy: GroupPolicyChoice;
+  groupAllowlist?: string[];
 }
 
 export interface InitAnswers {
@@ -49,7 +56,11 @@ type Step =
   | { kind: "ghc-apiKey" }
   | { kind: "ghc-model" }
   | { kind: "channel" }
-  | { kind: "discord-token" };
+  | { kind: "discord-token" }
+  | { kind: "discord-dm-policy" }
+  | { kind: "discord-dm-userId" }
+  | { kind: "discord-group-policy" }
+  | { kind: "discord-group-allowlist" };
 
 interface Props {
   onDone: (answers: InitAnswers) => void;
@@ -66,6 +77,10 @@ function InitWizard({ onDone }: Props) {
 
   const [channel, setChannel] = useState<ChannelChoice>("skip");
   const [discordToken, setDiscordToken] = useState("");
+  const [dmPolicy, setDmPolicy] = useState<DmPolicyChoice>("disabled");
+  const [discordDmUserId, setDiscordDmUserId] = useState("");
+  const [groupPolicy, setGroupPolicy] = useState<GroupPolicyChoice>("allowlist");
+  const [groupAllowlistInput, setGroupAllowlistInput] = useState("");
 
   useInput((_input, key) => {
     if (key.ctrl && _input === "c") {
@@ -81,7 +96,21 @@ function InitWizard({ onDone }: Props) {
       ...(llm === "ghc-proxy"
         ? { ghcProxy: { baseUrl: ghcBaseUrl, apiKey: ghcApiKey, model: ghcModel } }
         : {}),
-      ...(channel === "discord" ? { discord: { token: discordToken } } : {}),
+      ...(channel === "discord"
+        ? {
+            discord: {
+              token: discordToken,
+              dmPolicy,
+              ...(dmPolicy === "allowlist" && discordDmUserId.trim().length > 0
+                ? { dmUserId: discordDmUserId.trim() }
+                : {}),
+              groupPolicy,
+              ...(groupPolicy === "allowlist" && groupAllowlistInput.trim().length > 0
+                ? { groupAllowlist: groupAllowlistInput.trim().split(",").map((s) => s.trim()) }
+                : {}),
+            },
+          }
+        : {}),
       ...overrides,
     };
     onDone(answers);
@@ -190,13 +219,91 @@ function InitWizard({ onDone }: Props) {
               value={discordToken}
               onChange={setDiscordToken}
               onSubmit={() => {
-                if (discordToken.trim().length > 0) finish();
+                if (discordToken.trim().length > 0) setStep({ kind: "discord-dm-policy" });
               }}
             />
           </Box>
           {discordToken.trim().length === 0 && (
             <Text color="yellow">  token is required</Text>
           )}
+        </Box>
+      )}
+
+      {step.kind === "discord-dm-policy" && (
+        <Box flexDirection="column">
+          <Text>DM (direct message) policy:</Text>
+          <SelectInput
+            items={[
+              { label: "disabled (default)", value: "disabled" as const },
+              { label: "allowlist (enter your Discord user ID)", value: "allowlist" as const },
+            ]}
+            onSelect={(item) => {
+              setDmPolicy(item.value);
+              if (item.value === "allowlist") setStep({ kind: "discord-dm-userId" });
+              else setStep({ kind: "discord-group-policy" });
+            }}
+          />
+        </Box>
+      )}
+
+      {step.kind === "discord-dm-userId" && (
+        <Box flexDirection="column">
+          <Text>Your Discord user ID (numeric, e.g. 123456789012345678):</Text>
+          <Box>
+            <Text color="cyan">› </Text>
+            <TextInput
+              value={discordDmUserId}
+              onChange={setDiscordDmUserId}
+              onSubmit={() => {
+                if (/^\d+$/.test(discordDmUserId.trim())) setStep({ kind: "discord-group-policy" });
+              }}
+            />
+          </Box>
+          {discordDmUserId.trim().length > 0 && !/^\d+$/.test(discordDmUserId.trim()) && (
+            <Text color="yellow">  must be a numeric Discord user ID</Text>
+          )}
+        </Box>
+      )}
+
+      {step.kind === "discord-group-policy" && (
+        <Box flexDirection="column">
+          <Text>Group (server/guild) policy:</Text>
+          <SelectInput
+            items={[
+              { label: "allowlist (default — enter server/channel IDs)", value: "allowlist" as const },
+              { label: "open (accept all servers)", value: "open" as const },
+              { label: "disabled (ignore all guild messages)", value: "disabled" as const },
+            ]}
+            onSelect={(item) => {
+              setGroupPolicy(item.value);
+              if (item.value === "allowlist") setStep({ kind: "discord-group-allowlist" });
+              else finish();
+            }}
+          />
+        </Box>
+      )}
+
+      {step.kind === "discord-group-allowlist" && (
+        <Box flexDirection="column">
+          <Text>Server/channel allowlist (format: serverId or serverId/channelId, comma-separated):</Text>
+          <Text dimColor>  e.g. 123456789012345678, 987654321098765432/111222333444555666</Text>
+          <Box>
+            <Text color="cyan">› </Text>
+            <TextInput
+              value={groupAllowlistInput}
+              onChange={setGroupAllowlistInput}
+              onSubmit={() => {
+                const entries = groupAllowlistInput.trim().split(",").map((s) => s.trim()).filter(Boolean);
+                const valid = entries.every((e) => /^\d+(\/\d+)?$/.test(e));
+                if (entries.length > 0 && valid) finish();
+              }}
+            />
+          </Box>
+          {groupAllowlistInput.trim().length > 0 && (() => {
+            const entries = groupAllowlistInput.trim().split(",").map((s) => s.trim()).filter(Boolean);
+            const valid = entries.every((e) => /^\d+(\/\d+)?$/.test(e));
+            return !valid ? <Text color="yellow">  each entry must be serverId or serverId/channelId (numeric)</Text> : null;
+          })()}
         </Box>
       )}
     </Box>

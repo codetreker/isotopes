@@ -32,25 +32,58 @@ const TOOLS = `tools:
 `;
 
 const AGENTS = `agents:
-  - id: assistant
-    name: Assistant
-    systemPrompt: |
-      You are a helpful assistant running locally via Isotopes.
+  - id: main
 `;
 
 function renderChannels(answers: InitAnswers): string {
   if (answers.channel !== "discord" || !answers.discord) return "";
-  const { token } = answers.discord;
+  const { token, dmPolicy, dmUserId, groupPolicy, groupAllowlist } = answers.discord;
+
+  const dmBlock = dmPolicy === "allowlist" && dmUserId
+    ? `        dm:
+          policy: allowlist
+          allowlist:
+            - "${dmUserId}"
+`
+    : `        dm:
+          policy: disabled
+`;
+
+  let groupBlock: string;
+  if (groupPolicy === "allowlist" && groupAllowlist?.length) {
+    const guildIds = new Set<string>();
+    const channelIds: string[] = [];
+    for (const entry of groupAllowlist) {
+      const [guildId, channelId] = entry.split("/");
+      guildIds.add(guildId);
+      if (channelId) channelIds.push(channelId);
+    }
+    const guildLines = [...guildIds].map((id) => `            - "${id}"`).join("\n");
+    const channelLines = channelIds.map((id) => `            - "${id}"`).join("\n");
+    groupBlock = `        group:
+          policy: allowlist
+          guildAllowlist:
+${guildLines}
+`;
+    if (channelLines.length > 0) {
+      groupBlock += `          channelAllowlist:
+${channelLines}
+`;
+    }
+  } else {
+    groupBlock = `        group:
+          policy: ${groupPolicy}
+`;
+  }
+
   return `
 channels:
   discord:
     accounts:
       main:
         token: ${token}
-        defaultAgentId: assistant
-        dm:
-          policy: disabled
-        threadBindings:
+        defaultAgentId: main
+${dmBlock}${groupBlock}        threadBindings:
           enabled: true
 `;
 }
