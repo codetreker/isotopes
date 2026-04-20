@@ -4,6 +4,7 @@
 
 import { parseArgs } from "node:util";
 import path from "node:path";
+import fs from "node:fs/promises";
 import { VERSION } from "./version.js";
 import { loadConfig } from "./core/config.js";
 import { logger } from "./core/logger.js";
@@ -74,6 +75,7 @@ const { values, positionals } = parseArgs({
     lines: { type: "string" },
     level: { type: "string" },
     follow: { type: "boolean", short: "f" },
+    force: { type: "boolean" },
   },
   allowPositionals: true,
 });
@@ -87,6 +89,7 @@ Isotopes v${VERSION}
 
 Usage:
   isotopes                           Run in foreground (default)
+  isotopes init [--force]            Write a default ~/.isotopes/isotopes.yaml
   isotopes start [--config path]     Start as background daemon
   isotopes stop                      Stop the running daemon
   isotopes status                    Show daemon status
@@ -657,11 +660,51 @@ async function main() {
 }
 
 // ---------------------------------------------------------------------------
+// init — write default config
+// ---------------------------------------------------------------------------
+
+async function handleInitCommand(): Promise<void> {
+  const home = getIsotopesHome();
+  const configPath = getConfigPath();
+  await fs.mkdir(home, { recursive: true });
+
+  const exists = await fs
+    .stat(configPath)
+    .then(() => true)
+    .catch(() => false);
+
+  if (exists && !values.force) {
+    console.error(`Config already exists: ${configPath}`);
+    console.error(`Re-run with --force to overwrite.`);
+    process.exit(1);
+  }
+
+  const { runInitWizard } = await import("./init/wizard.js");
+  const { renderConfig } = await import("./init/render.js");
+  const answers = await runInitWizard();
+  const yaml = renderConfig(answers);
+
+  await fs.writeFile(configPath, yaml, "utf-8");
+  console.log(`Wrote config to ${configPath}`);
+  console.log(``);
+  console.log(`Next:`);
+  if (answers.llm === "skip") {
+    console.log(`  • Edit ${configPath} and configure a provider`);
+  }
+  console.log(`  • isotopes        # run in foreground`);
+  console.log(`  • isotopes tui    # interactive TUI`);
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
 async function run(): Promise<void> {
   switch (subcommand) {
+    case "init":
+      await handleInitCommand();
+      break;
+
     case "start":
     case "stop":
     case "status":
