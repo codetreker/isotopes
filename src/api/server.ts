@@ -2,11 +2,13 @@
 // Minimal server built on Node.js built-in http module (no Express).
 
 import http from "node:http";
+import path from "node:path";
 import { createLogger } from "../core/logger.js";
 import type { CronScheduler } from "../automation/cron-job.js";
 import type { ConfigReloader } from "../workspace/config-reloader.js";
 import type { AgentManager, SessionStore } from "../core/types.js";
 import type { UsageTracker } from "../core/usage-tracker.js";
+import type { SessionStoreManager } from "../core/session-store-manager.js";
 import {
   applyCors,
   parseJsonBody,
@@ -16,9 +18,14 @@ import {
   type ApiRequest,
 } from "./middleware.js";
 import { matchRoute, type RouteDeps } from "./routes.js";
+import { serveStaticFile } from "./static.js";
+import type { HookRegistry } from "../plugins/hooks.js";
+import type { UIRegistry } from "../plugins/ui-registry.js";
 
 // Register subagent routes (side-effect import)
 import "./subagents.js";
+// Register chat API routes (side-effect import)
+import "./chat.js";
 
 const log = createLogger("api:server");
 
@@ -46,19 +53,36 @@ export interface ApiServerConfig {
  * Exposes endpoints for managing Discord sessions, cron jobs, config, and
  * daemon status. Supports CORS, JSON body parsing, and parameterized routes.
  */
+export interface ApiServerDeps {
+  cronScheduler: CronScheduler;
+  configReloader?: ConfigReloader;
+  agentManager?: AgentManager;
+  usageTracker?: UsageTracker;
+  discordSessionStores?: Map<string, SessionStore>;
+  uiRegistry?: UIRegistry;
+  sessionStoreManager?: SessionStoreManager;
+  hooks?: HookRegistry;
+}
+
 export class ApiServer {
   private server: http.Server | null = null;
   private deps: RouteDeps;
+  private uiRegistry?: UIRegistry;
 
   constructor(
     private config: ApiServerConfig,
-    cronScheduler: CronScheduler,
-    configReloader?: ConfigReloader,
-    agentManager?: AgentManager,
-    usageTracker?: UsageTracker,
-    discordSessionStores?: Map<string, SessionStore>,
+    deps: ApiServerDeps,
   ) {
-    this.deps = { cronScheduler, configReloader, agentManager, usageTracker, discordSessionStores };
+    this.uiRegistry = deps.uiRegistry;
+    this.deps = {
+      cronScheduler: deps.cronScheduler,
+      configReloader: deps.configReloader,
+      agentManager: deps.agentManager,
+      usageTracker: deps.usageTracker,
+      discordSessionStores: deps.discordSessionStores,
+      sessionStoreManager: deps.sessionStoreManager,
+      hooks: deps.hooks,
+    };
   }
 
   /**
@@ -93,6 +117,33 @@ export class ApiServer {
       if (bodyError) {
         sendError(res, 400, bodyError);
         return;
+      }
+
+      // Plugin UI static files
+      if (this.uiRegistry) {
+        // Navigation shell
+        if (req.pathname === "/ui" || req.pathname === "/ui/") {
+          const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+          const entries = this.uiRegistry.list();
+          const links = entries
+            .map((e) => `<li><a href="${escHtml(e.mountPath!)}">${escHtml(e.label)}</a></li>`)
+            .join("\n");
+          const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Isotopes UI</title></head><body><h1>Isotopes UI Plugins</h1><ul>${links}</ul></body></html>`;
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(html);
+          return;
+        }
+
+        const uiMatch = this.uiRegistry.match(req.pathname);
+        if (uiMatch) {
+          const mount = uiMatch.mountPath!;
+          const relativePath = req.pathname.slice(mount.length) || "/index.html";
+          const filePath = path.join(uiMatch.staticDir, relativePath);
+          const served = await serveStaticFile(res, filePath, uiMatch.staticDir, uiMatch.spaFallback ?? false);
+          if (served) return;
+          sendError(res, 404, `Not found: ${req.pathname}`);
+          return;
+        }
       }
 
       // Route matching
