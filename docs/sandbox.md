@@ -112,6 +112,48 @@ and `SandboxFs` satisfy. Tools take `fsImpl: FsLike` and call its methods —
 they have no awareness of host vs. sandbox. `cli.ts` is the single place
 that picks the implementation per agent.
 
+## What's NOT sandboxed: subagents
+
+Subagent runners (`ClaudeRunner` spawning the Claude Code CLI, `BuiltinRunner`
+running in-process) execute on the host and would bypass the sandbox boundary
+entirely. To avoid this escape, **`spawn_subagent` is not registered for
+sandboxed agents** — the tool simply does not exist in their tool list.
+
+If you need a coding CLI inside the sandbox, build a custom image that
+includes it and point `sandbox.docker.image` at the new tag. Recommended
+naming convention: `isotopes-sandbox-<cli>` (e.g. `isotopes-sandbox-claude`),
+so it composes with the base image namespace and aligns with any
+prebuilt images we may ship later (see issue #451):
+
+```dockerfile
+# Dockerfile.claude
+FROM isotopes-sandbox:latest
+USER root
+RUN npm install -g @anthropic-ai/claude-code
+USER agent
+```
+
+```bash
+docker build -t isotopes-sandbox-claude:latest -f Dockerfile.claude .
+```
+
+```yaml
+# isotopes.yaml
+sandbox:
+  docker:
+    image: isotopes-sandbox-claude:latest
+```
+
+Then exec into the running container (containers are named
+`isotopes-sandbox-<agent-id>` — see `src/sandbox/executor.ts`):
+
+```bash
+docker exec -it isotopes-sandbox-<agent-id> claude
+```
+
+Credentials must be mounted into the container (e.g. via `docker.binds`) —
+they are not forwarded from the host automatically.
+
 ## Background processes
 
 `exec` with `background: true` works in sandbox mode: the host spawns a
