@@ -606,22 +606,50 @@ async function handleLogsCommand(): Promise<void> {
   };
 
   if (follow) {
-    // Follow mode: use tail -f
-    const { spawn } = await import("node:child_process");
-    const tail = spawn("tail", ["-f", logFile], { stdio: ["ignore", "pipe", "inherit"] });
+    // Follow mode: poll file for new content (fs.watchFile is more reliable
+    // than fs.watch for append-only log files, especially on network FS).
+    const nodeFs = await import("node:fs");
+    let position = (await fsPromises.stat(logFile)).size;
+    let reading = false;
+    let trailingFragment = "";
 
-    tail.stdout.on("data", (chunk: Buffer) => {
-      const lines = chunk.toString().split("\n");
-      for (const line of lines) {
-        if (line && matchesLevel(line)) {
-          console.log(line);
-        }
+    const readNew = () => {
+      if (reading) return;
+      // Handle log rotation: if file shrank, reset to beginning
+      let currentSize: number;
+      try {
+        currentSize = nodeFs.statSync(logFile).size;
+      } catch {
+        return;
       }
-    });
+      if (currentSize < position) position = 0;
+      if (currentSize === position) return;
 
-    // Handle Ctrl+C gracefully
+      reading = true;
+      const readStart = position;
+      position = currentSize;
+
+      const stream = nodeFs.createReadStream(logFile, { start: readStart, end: currentSize - 1, encoding: "utf-8" });
+      let buf = "";
+      stream.on("data", (chunk: string | Buffer) => { buf += String(chunk); });
+      stream.on("end", () => {
+        reading = false;
+        const text = trailingFragment + buf;
+        const parts = text.split("\n");
+        trailingFragment = parts.pop() ?? "";
+        for (const line of parts) {
+          if (line && matchesLevel(line)) {
+            console.log(line);
+          }
+        }
+      });
+      stream.on("error", () => { reading = false; });
+    };
+
+    nodeFs.watchFile(logFile, { interval: 500 }, () => readNew());
+
     process.on("SIGINT", () => {
-      tail.kill();
+      nodeFs.unwatchFile(logFile);
       process.exit(0);
     });
   } else {
