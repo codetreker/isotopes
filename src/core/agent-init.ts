@@ -31,7 +31,7 @@ import {
   resolveToolGuards,
   applyToolPolicy,
 } from "./tools.js";
-import { createReplyReactTools, LazyTransportContext } from "../tools/reply-react.js";
+import { createReactTools, LazyTransportContext } from "../tools/react.js";
 import { createExecTools, ProcessRegistry } from "../tools/exec.js";
 import { SandboxExecutor, SandboxFs, shouldSandbox, type FsLike } from "../sandbox/index.js";
 import * as nodeFs from "node:fs/promises";
@@ -68,7 +68,7 @@ export interface InitAgentOptions {
   agentManager: DefaultAgentManager;
   /** Pre-built sandbox executor (optional — no sandbox if omitted) */
   sandboxExecutor?: SandboxExecutor;
-  /** Transport context for reply/react tools (optional — skipped if omitted) */
+  /** Transport context for react tools (optional — skipped if omitted) */
   transportContext?: LazyTransportContext;
   /** Hook registry for lifecycle events (optional) */
   hooks?: HookRegistry;
@@ -173,9 +173,9 @@ export async function initializeAgent(opts: InitAgentOptions): Promise<InitAgent
     toolRegistry.register(tool, handler);
   }
 
-  // 10. Register reply/react tools (transport is bound lazily after transport starts)
+  // 10. Register react tools (transport is bound lazily after transport starts)
   if (transportContext) {
-    for (const { tool, handler } of createReplyReactTools(transportContext)) {
+    for (const { tool, handler } of createReactTools(transportContext)) {
       toolRegistry.register(tool, handler);
     }
   }

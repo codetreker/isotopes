@@ -17,7 +17,7 @@ import { SessionStoreManager } from "./session-store-manager.js";
 import { DiscordTransportManager } from "../transports/discord-manager.js";
 import { ThreadBindingManager } from "./thread-bindings.js";
 import { createLogger } from "./logger.js";
-import { LazyTransportContext } from "../tools/reply-react.js";
+import { LazyTransportContext } from "../tools/react.js";
 import { ProcessRegistry } from "../tools/exec.js";
 import { ContainerManager, SandboxExecutor } from "../sandbox/index.js";
 import { initializeAgent } from "./agent-init.js";
@@ -313,7 +313,7 @@ export async function createRuntime(opts: RuntimeOptions): Promise<Runtime> {
       if (firstTransport) {
         for (const [agentId, ctx] of transportContexts) {
           ctx.setTransport(firstTransport);
-          log.debug(`Bound Discord transport for reply/react tools (agent: ${agentId})`);
+          log.debug(`Bound Discord transport for react tools (agent: ${agentId})`);
         }
       }
     }
