@@ -70,6 +70,10 @@ export async function runAgentLoop(opts: RunAgentOptions): Promise<AgentRunResul
       if (onTextDelta) {
         await onTextDelta(responseText);
       }
+    } else if (event.type === "tool_call") {
+      log.debug(`Tool call: ${event.name}`, { id: event.id });
+    } else if (event.type === "tool_result") {
+      log.debug(`Tool result: ${event.id}`);
     } else if (event.type === "turn_end") {
       if (usageTracker && event.usage) {
         usageTracker.record(sessionId, event.usage);

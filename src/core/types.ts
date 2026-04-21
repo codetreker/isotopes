@@ -2,6 +2,7 @@
 // Zero coupling to any specific agent SDK — these are OUR types.
 
 import type { SandboxConfig } from "../sandbox/config.js";
+import type { ReplyToMode } from "../transports/reply-directive.js";
 
 // ---------------------------------------------------------------------------
 // Messages
@@ -390,6 +391,7 @@ export interface DiscordAccountConfig {
   context?: DiscordAccountContextConfig;
   /** Discord user IDs allowed to execute slash commands on this account. */
   adminUsers?: string[];
+  replyToMode?: ReplyToMode;
 }
 
 /** Channels section of the configuration */
