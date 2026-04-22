@@ -10,28 +10,30 @@ import {
   IGNORE_PATTERNS,
   type WorkspaceReloadedEvent,
 } from "./hot-reload.js";
-import type { AgentManager, AgentInstance, AgentConfig } from "../core/types.js";
+import type { AgentConfig } from "../core/types.js";
+import type { PiMonoInstance } from "../core/pi-mono.js";
+import type { DefaultAgentManager } from "../core/agent-manager.js";
 
 // ---------------------------------------------------------------------------
-// Mock AgentManager
+// Mock DefaultAgentManager
 // ---------------------------------------------------------------------------
 
-function createMockAgentManager(): AgentManager & { reloadWorkspaceCalls: string[] } {
+function createMockDefaultAgentManager(): DefaultAgentManager & { reloadWorkspaceCalls: string[] } {
   const reloadWorkspaceCalls: string[] = [];
 
   return {
     reloadWorkspaceCalls,
-    async create(config: AgentConfig): Promise<AgentInstance> {
-      return { id: config.id } as unknown as AgentInstance;
+    async create(config: AgentConfig): Promise<PiMonoInstance> {
+      return { id: config.id } as unknown as PiMonoInstance;
     },
-    get(id: string): AgentInstance | undefined {
-      return { id } as unknown as AgentInstance;
+    get(id: string): PiMonoInstance | undefined {
+      return { id } as unknown as PiMonoInstance;
     },
     list(): AgentConfig[] {
       return [];
     },
-    async update(_id: string, _updates: Partial<AgentConfig>): Promise<AgentInstance> {
-      return { id: _id } as unknown as AgentInstance;
+    async update(_id: string, _updates: Partial<AgentConfig>): Promise<PiMonoInstance> {
+      return { id: _id } as unknown as PiMonoInstance;
     },
     async delete(_id: string): Promise<void> {},
     async getPrompt(_id: string): Promise<string> {
@@ -41,7 +43,7 @@ function createMockAgentManager(): AgentManager & { reloadWorkspaceCalls: string
     async reloadWorkspace(id: string): Promise<void> {
       reloadWorkspaceCalls.push(id);
     },
-  };
+  } as unknown as DefaultAgentManager & { reloadWorkspaceCalls: string[] };
 }
 
 // ---------------------------------------------------------------------------
@@ -50,12 +52,12 @@ function createMockAgentManager(): AgentManager & { reloadWorkspaceCalls: string
 
 describe("HotReloadManager", () => {
   let tempDir: string;
-  let mockManager: ReturnType<typeof createMockAgentManager>;
+  let mockManager: ReturnType<typeof createMockDefaultAgentManager>;
   let hotReload: HotReloadManager;
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "hot-reload-test-"));
-    mockManager = createMockAgentManager();
+    mockManager = createMockDefaultAgentManager();
     hotReload = new HotReloadManager(mockManager, {
       enabled: true,
       debounceMs: 50, // Fast debounce for tests

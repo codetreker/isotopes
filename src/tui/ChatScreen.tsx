@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Box, Text, useInput, useApp } from "ink";
-import type { AgentMessage, AgentInstance } from "../core/types.js";
+import type { AgentMessage } from "../core/types.js";
+import type { PiMonoInstance } from "../core/pi-mono.js";
 import { loadConfig } from "../core/config.js";
 import { PiMonoCore } from "../core/pi-mono.js";
 import { DefaultAgentManager } from "../core/agent-manager.js";
@@ -24,7 +25,7 @@ export function ChatScreen({ options, onSwitchScreen }: Props) {
   const [agentReady, setAgentReady] = useState(false);
   const [agentId, setAgentId] = useState(options.agent ?? "");
   const [error, setError] = useState<string | null>(null);
-  const agentRef = useRef<AgentInstance | null>(null);
+  const agentRef = useRef<PiMonoInstance | null>(null);
   const historyRef = useRef<AgentMessage[]>([]);
   const autoMessageSent = useRef(false);
 
@@ -89,8 +90,8 @@ export function ChatScreen({ options, onSwitchScreen }: Props) {
     const toolCalls: ToolCallEntry[] = [];
     try {
       for await (const event of agentRef.current.prompt(historyRef.current)) {
-        if (event.type === "text_delta") {
-          responseText += event.text;
+        if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+          responseText += event.assistantMessageEvent.delta;
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last?.role === "assistant") {
@@ -98,8 +99,8 @@ export function ChatScreen({ options, onSwitchScreen }: Props) {
             }
             return [...prev, { role: "assistant", content: responseText, toolCalls: [...toolCalls], timestamp: new Date() }];
           });
-        } else if (event.type === "tool_call") {
-          toolCalls.push({ id: event.id, name: event.name, args: typeof event.args === "string" ? event.args : JSON.stringify(event.args) });
+        } else if (event.type === "tool_execution_start") {
+          toolCalls.push({ id: event.toolCallId, name: event.toolName, args: typeof event.args === "string" ? event.args : JSON.stringify(event.args) });
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last?.role === "assistant") {
@@ -107,14 +108,13 @@ export function ChatScreen({ options, onSwitchScreen }: Props) {
             }
             return prev;
           });
-        } else if (event.type === "tool_result") {
-          const tc = toolCalls.find((t) => t.id === event.id);
+        } else if (event.type === "tool_execution_end") {
+          const output = typeof event.result === "string" ? event.result : JSON.stringify(event.result);
+          const tc = toolCalls.find((t) => t.id === event.toolCallId);
           if (tc) {
-            tc.result = event.output;
+            tc.result = output;
             tc.isError = event.isError;
           }
-        } else if (event.type === "error") {
-          setMessages((prev) => [...prev, { role: "system", content: `Error: ${event.error}`, timestamp: new Date() }]);
         }
       }
     } catch (err) {

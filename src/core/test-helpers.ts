@@ -3,18 +3,15 @@
 // and SessionStore mocks. Centralise them here.
 
 import { vi } from "vitest";
-import type { AgentInstance, AgentManager, SessionStore, AgentEvent } from "./types.js";
+import type { AgentEvent } from "@mariozechner/pi-agent-core";
+import type { SessionStore } from "./types.js";
+import type { PiMonoInstance } from "./pi-mono.js";
+import type { DefaultAgentManager } from "./agent-manager.js";
 
-/**
- * Create a mock AgentInstance whose prompt() yields the given events.
- *
- * If no events are provided, yields two text_delta events ("Hello ", "world!")
- * followed by an agent_end event.
- */
-export function createMockAgentInstance(events?: AgentEvent[]): AgentInstance {
+export function createMockAgentInstance(events?: AgentEvent[]): PiMonoInstance {
   const defaultEvents: AgentEvent[] = [
-    { type: "text_delta", text: "Hello " },
-    { type: "text_delta", text: "world!" },
+    { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "Hello " } as never },
+    { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "world!" } as never },
     { type: "agent_end", messages: [] },
   ];
 
@@ -29,17 +26,10 @@ export function createMockAgentInstance(events?: AgentEvent[]): AgentInstance {
     abort: vi.fn(),
     steer: vi.fn(),
     followUp: vi.fn(),
-  };
+  } as unknown as PiMonoInstance;
 }
 
-/**
- * Create a mock AgentManager that returns a single shared AgentInstance
- * from get().
- *
- * @param instance — optional pre-built mock instance; defaults to
- *   createMockAgentInstance() with the standard text_delta sequence.
- */
-export function createMockAgentManager(instance?: AgentInstance): AgentManager {
+export function createMockAgentManager(instance?: PiMonoInstance): DefaultAgentManager {
   const mockInstance = instance ?? createMockAgentInstance();
 
   return {
@@ -51,7 +41,7 @@ export function createMockAgentManager(instance?: AgentInstance): AgentManager {
     getPrompt: vi.fn(),
     updatePrompt: vi.fn(),
     reloadWorkspace: vi.fn(),
-  };
+  } as unknown as DefaultAgentManager;
 }
 
 /**

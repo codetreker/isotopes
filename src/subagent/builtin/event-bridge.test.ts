@@ -1,7 +1,7 @@
 // src/subagent/builtin/event-bridge.test.ts — Tests for AgentEvent → SubagentEvent bridge
 
 import { describe, it, expect } from "vitest";
-import type { AgentEvent } from "../../core/types.js";
+import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import type { SubagentEvent } from "../types.js";
 import { bridgeAgentEvents } from "./event-bridge.js";
 
@@ -19,9 +19,9 @@ describe("bridgeAgentEvents", () => {
   it("buffers text_delta and emits a single message at turn_end", async () => {
     const out = await collect([
       { type: "turn_start" },
-      { type: "text_delta", text: "Hello, " },
-      { type: "text_delta", text: "world." },
-      { type: "turn_end" },
+      { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "Hello, " } as never },
+      { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "world." } as never },
+      { type: "turn_end", message: {} as never, toolResults: [] },
       { type: "agent_end", messages: [] },
     ]);
     expect(out).toEqual([
@@ -33,8 +33,8 @@ describe("bridgeAgentEvents", () => {
   it("skips empty messages", async () => {
     const out = await collect([
       { type: "turn_start" },
-      { type: "text_delta", text: "   " },
-      { type: "turn_end" },
+      { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "   " } as never },
+      { type: "turn_end", message: {} as never, toolResults: [] },
       { type: "agent_end", messages: [] },
     ]);
     expect(out).toEqual([{ type: "done", exitCode: 0 }]);
@@ -42,7 +42,7 @@ describe("bridgeAgentEvents", () => {
 
   it("translates tool_call → tool_use", async () => {
     const out = await collect([
-      { type: "tool_call", id: "1", name: "shell", args: { cmd: "ls" } },
+      { type: "tool_execution_start", toolCallId: "1", toolName: "shell", args: { cmd: "ls" } },
       { type: "agent_end", messages: [] },
     ]);
     expect(out[0]).toEqual({ type: "tool_use", toolName: "shell", toolInput: { cmd: "ls" } });
@@ -50,8 +50,8 @@ describe("bridgeAgentEvents", () => {
 
   it("translates tool_result and surfaces error flag", async () => {
     const out = await collect([
-      { type: "tool_result", id: "1", output: "ok" },
-      { type: "tool_result", id: "2", output: "boom", isError: true },
+      { type: "tool_execution_end", toolCallId: "1", toolName: "test", result: "ok", isError: false },
+      { type: "tool_execution_end", toolCallId: "2", toolName: "test", result: "boom", isError: true },
       { type: "agent_end", messages: [] },
     ]);
     expect(out[0]).toEqual({ type: "tool_result", toolResult: "ok" });
@@ -60,7 +60,7 @@ describe("bridgeAgentEvents", () => {
 
   it("emits error+done(1) when agent_end carries errorMessage", async () => {
     const out = await collect([
-      { type: "agent_end", messages: [], errorMessage: "boom" },
+      { type: "agent_end", messages: [{ role: "assistant", errorMessage: "boom", content: [], timestamp: Date.now() } as never] },
     ]);
     expect(out).toEqual([
       { type: "error", error: "boom" },
@@ -68,9 +68,9 @@ describe("bridgeAgentEvents", () => {
     ]);
   });
 
-  it("emits error+done(1) for an error event", async () => {
+  it("emits error+done(1) when agent_end has errorMessage", async () => {
     const out = await collect([
-      { type: "error", error: new Error("kaboom") },
+      { type: "agent_end", messages: [{ role: "assistant", errorMessage: "kaboom", content: [], timestamp: 0 } as never] },
     ]);
     expect(out).toEqual([
       { type: "error", error: "kaboom" },
@@ -81,7 +81,7 @@ describe("bridgeAgentEvents", () => {
   it("flushes trailing text and emits done if stream ends without agent_end", async () => {
     const out = await collect([
       { type: "turn_start" },
-      { type: "text_delta", text: "tail" },
+      { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "tail" } as never },
     ]);
     expect(out).toEqual([
       { type: "message", content: "tail" },

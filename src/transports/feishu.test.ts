@@ -11,7 +11,9 @@ import {
   resolveAgentId,
   type FeishuMessageEvent,
 } from "./feishu.js";
-import type { AgentManager, SessionStore, AgentInstance, AgentEvent, ChannelsConfig, Binding } from "../core/types.js";
+import type { SessionStore, AgentEvent, ChannelsConfig, Binding } from "../core/types.js";
+import type { PiMonoInstance } from "../core/pi-mono.js";
+import type { DefaultAgentManager } from "../core/agent-manager.js";
 import {
   createMockAgentManager,
   createMockAgentInstance,
@@ -372,7 +374,7 @@ describe("shouldRespondToGroupMessage", () => {
 
 describe("FeishuTransport", () => {
   let transport: FeishuTransport;
-  let agentManager: AgentManager;
+  let agentManager: DefaultAgentManager;
   let sessionStore: SessionStore;
 
   beforeEach(() => {
@@ -380,8 +382,8 @@ describe("FeishuTransport", () => {
     capturedEventHandler = null;
     agentManager = createMockAgentManager(
       createMockAgentInstance([
-        { type: "text_delta", text: "Hello " },
-        { type: "text_delta", text: "from Feishu!" },
+        { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "Hello " } as never },
+        { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "from Feishu!" } as never },
         { type: "agent_end", messages: [] },
       ]),
     );
@@ -726,15 +728,15 @@ describe("FeishuTransport", () => {
             async next() {
               throw new Error("Agent crashed");
             },
-          };
+          } as AsyncIterator<AgentEvent>;
         },
       };
-      const errorAgent: AgentInstance = {
+      const errorAgent = {
         prompt: vi.fn(() => throwingIterable),
         abort: vi.fn(),
         steer: vi.fn(),
         followUp: vi.fn(),
-      };
+      } as unknown as PiMonoInstance;
       agentManager.get = vi.fn(() => errorAgent);
 
       const event = createDMEvent();
@@ -754,9 +756,7 @@ describe("FeishuTransport", () => {
       const errorAgent = createMockAgentInstance([
         {
           type: "agent_end",
-          messages: [],
-          stopReason: "error",
-          errorMessage: "API key invalid",
+          messages: [{ role: "assistant", stopReason: "error", errorMessage: "API key invalid", content: [], timestamp: 0 } as never],
         },
       ]);
       agentManager.get = vi.fn(() => errorAgent);

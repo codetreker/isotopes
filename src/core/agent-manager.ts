@@ -1,13 +1,8 @@
-import { resolveBundledSkillsDir } from "../skills/bundled-dir.js";
 // src/core/agent-manager.ts — Agent lifecycle management
-// Creates, stores, and manages AgentInstance objects.
 
-import type {
-  AgentConfig,
-  AgentCore,
-  AgentInstance,
-  AgentManager,
-} from "./types.js";
+import type { AgentConfig } from "./types.js";
+import { PiMonoCore, PiMonoInstance } from "./pi-mono.js";
+import { resolveBundledSkillsDir } from "../skills/bundled-dir.js";
 import {
   buildSystemPrompt,
   ensureWorkspaceStructure,
@@ -28,7 +23,7 @@ export interface AgentCreateOptions {
 /** Internal entry combining config, instance, and workspace */
 interface AgentEntry {
   config: AgentConfig;
-  instance: AgentInstance;
+  instance: PiMonoInstance;
   workspace: WorkspaceContext | null;
   /** Base system prompt before workspace assembly (for hot-reload) */
   baseSystemPrompt: string;
@@ -41,15 +36,15 @@ interface AgentEntry {
 /**
  * DefaultAgentManager — in-memory {@link AgentManager} implementation.
  *
- * Manages agent configs and instances backed by an {@link AgentCore}.
+ * Manages agent configs and instances backed by an {@link PiMonoCore}.
  * Each agent can optionally have its own workspace directory containing
  * SOUL.md, MEMORY.md, and other context files that are merged into
  * the system prompt.
  */
-export class DefaultAgentManager implements AgentManager {
+export class DefaultAgentManager {
   private agents = new Map<string, AgentEntry>();
 
-  constructor(private core: AgentCore) {}
+  constructor(private core: PiMonoCore) {}
 
   /**
    * Create a new agent.
@@ -58,7 +53,7 @@ export class DefaultAgentManager implements AgentManager {
    * (workspace context + tool guards included). The options provide workspace
    * metadata needed for hot-reload.
    */
-  async create(config: AgentConfig, options?: AgentCreateOptions): Promise<AgentInstance> {
+  async create(config: AgentConfig, options?: AgentCreateOptions): Promise<PiMonoInstance> {
     if (this.agents.has(config.id)) {
       throw new Error(`Agent "${config.id}" already exists`);
     }
@@ -75,7 +70,7 @@ export class DefaultAgentManager implements AgentManager {
     return instance;
   }
 
-  get(id: string): AgentInstance | undefined {
+  get(id: string): PiMonoInstance | undefined {
     return this.agents.get(id)?.instance;
   }
 
@@ -88,7 +83,7 @@ export class DefaultAgentManager implements AgentManager {
     return Array.from(this.agents.values()).map((e) => e.config);
   }
 
-  async update(id: string, updates: Partial<AgentConfig>): Promise<AgentInstance> {
+  async update(id: string, updates: Partial<AgentConfig>): Promise<PiMonoInstance> {
     const entry = this.agents.get(id);
     if (!entry) {
       throw new Error(`Agent "${id}" not found`);

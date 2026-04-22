@@ -22,8 +22,8 @@ function createMockLogger(): Logger {
 describe("runAgentLoop", () => {
   it("accumulates text_delta events into responseText", async () => {
     const agent = createMockAgentInstance([
-      { type: "text_delta", text: "Hello " },
-      { type: "text_delta", text: "world!" },
+      { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "Hello " } as never },
+      { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "world!" } as never },
       { type: "agent_end", messages: [] },
     ]);
     const sessionStore = createMockSessionStore();
@@ -42,7 +42,7 @@ describe("runAgentLoop", () => {
 
   it("stores assistant message on agent_end", async () => {
     const agent = createMockAgentInstance([
-      { type: "text_delta", text: "Reply" },
+      { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "Reply" } as never },
       { type: "agent_end", messages: [] },
     ]);
     const sessionStore = createMockSessionStore();
@@ -83,7 +83,7 @@ describe("runAgentLoop", () => {
 
   it("captures error message on agent_end with error stopReason", async () => {
     const agent = createMockAgentInstance([
-      { type: "agent_end", messages: [], stopReason: "error", errorMessage: "API key invalid" },
+      { type: "agent_end", messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: "API key invalid", timestamp: Date.now() } as never] },
     ]);
     const log = createMockLogger();
 
@@ -101,7 +101,7 @@ describe("runAgentLoop", () => {
 
   it("defaults errorMessage to 'Unknown agent error'", async () => {
     const agent = createMockAgentInstance([
-      { type: "agent_end", messages: [], stopReason: "error" },
+      { type: "agent_end", messages: [{ role: "assistant", content: [], stopReason: "error", timestamp: Date.now() } as never] },
     ]);
 
     const result = await runAgentLoop({
@@ -117,8 +117,8 @@ describe("runAgentLoop", () => {
 
   it("calls onTextDelta with accumulated text", async () => {
     const agent = createMockAgentInstance([
-      { type: "text_delta", text: "a" },
-      { type: "text_delta", text: "b" },
+      { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "a" } as never },
+      { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "b" } as never },
       { type: "agent_end", messages: [] },
     ]);
 
@@ -137,7 +137,7 @@ describe("runAgentLoop", () => {
 
   it("calls onToolComplete after turn_end and injects via steer", async () => {
     const agent = createMockAgentInstance([
-      { type: "turn_end" },
+      { type: "turn_end", message: {} as never, toolResults: [] },
       { type: "agent_end", messages: [] },
     ]);
     const sessionStore = createMockSessionStore();
@@ -163,7 +163,7 @@ describe("runAgentLoop", () => {
 
   it("does not call steer if onToolComplete returns null", async () => {
     const agent = createMockAgentInstance([
-      { type: "turn_end" },
+      { type: "turn_end", message: {} as never, toolResults: [] },
       { type: "agent_end", messages: [] },
     ]);
     const sessionStore = createMockSessionStore();
@@ -184,7 +184,7 @@ describe("runAgentLoop", () => {
 
   it("does not call onToolComplete if not provided", async () => {
     const agent = createMockAgentInstance([
-      { type: "turn_end" },
+      { type: "turn_end", message: {} as never, toolResults: [] },
       { type: "agent_end", messages: [] },
     ]);
     const sessionStore = createMockSessionStore();
@@ -203,12 +203,12 @@ describe("runAgentLoop", () => {
 
   it("persists tool_call blocks on the assistant message and tool_result as its own message", async () => {
     const agent = createMockAgentInstance([
-      { type: "text_delta", text: "Let me check." },
-      { type: "tool_call", id: "call-1", name: "shell", args: { cmd: "ls" } },
-      { type: "tool_result", id: "call-1", output: "a.txt\nb.txt" },
-      { type: "turn_end" },
-      { type: "text_delta", text: "Done." },
-      { type: "turn_end" },
+      { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "Let me check." } as never },
+      { type: "tool_execution_start", toolCallId: "call-1", toolName: "shell", args: { cmd: "ls" } },
+      { type: "tool_execution_end", toolCallId: "call-1", toolName: "test", result: "a.txt\nb.txt", isError: false },
+      { type: "turn_end", message: {} as never, toolResults: [] },
+      { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "Done." } as never },
+      { type: "turn_end", message: {} as never, toolResults: [] },
       { type: "agent_end", messages: [] },
     ]);
     const sessionStore = createMockSessionStore();
@@ -246,9 +246,9 @@ describe("runAgentLoop", () => {
   it("truncates oversized tool_result output when persisting", async () => {
     const big = "x".repeat(30_000);
     const agent = createMockAgentInstance([
-      { type: "tool_call", id: "c", name: "read_file", args: {} },
-      { type: "tool_result", id: "c", output: big },
-      { type: "turn_end" },
+      { type: "tool_execution_start", toolCallId: "c", toolName: "read_file", args: {} },
+      { type: "tool_execution_end", toolCallId: "c", toolName: "read_file", result: big, isError: false },
+      { type: "turn_end", message: {} as never, toolResults: [] },
       { type: "agent_end", messages: [] },
     ]);
     const sessionStore = createMockSessionStore();
@@ -272,9 +272,9 @@ describe("runAgentLoop", () => {
 
   it("propagates isError on tool_result blocks", async () => {
     const agent = createMockAgentInstance([
-      { type: "tool_call", id: "c", name: "shell", args: {} },
-      { type: "tool_result", id: "c", output: "boom", isError: true },
-      { type: "turn_end" },
+      { type: "tool_execution_start", toolCallId: "c", toolName: "shell", args: {} },
+      { type: "tool_execution_end", toolCallId: "c", toolName: "test", result: "boom", isError: true },
+      { type: "turn_end", message: {} as never, toolResults: [] },
       { type: "agent_end", messages: [] },
     ]);
     const sessionStore = createMockSessionStore();
@@ -295,8 +295,8 @@ describe("runAgentLoop", () => {
 
   it("flushes accumulated tool_calls at agent_end when turn_end is missing", async () => {
     const agent = createMockAgentInstance([
-      { type: "text_delta", text: "partial" },
-      { type: "tool_call", id: "c", name: "t", args: {} },
+      { type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "partial" } as never },
+      { type: "tool_execution_start", toolCallId: "c", toolName: "t", args: {} },
       { type: "agent_end", messages: [] },
     ]);
     const sessionStore = createMockSessionStore();

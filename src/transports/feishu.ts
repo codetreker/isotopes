@@ -3,8 +3,6 @@
 
 import * as lark from "@larksuiteoapi/node-sdk";
 import {
-  type AgentInstance,
-  type AgentManager,
   type Binding,
   type BindingPeer,
   type ChannelsConfig,
@@ -12,6 +10,8 @@ import {
   type SessionStore,
   type Transport,
 } from "../core/types.js";
+import type { PiMonoInstance } from "../core/pi-mono.js";
+import type { DefaultAgentManager } from "../core/agent-manager.js";
 import type { ContextConfigFile } from "../core/config.js";
 import { resolveBinding } from "../core/bindings.js";
 import { loggers } from "../core/logger.js";
@@ -139,7 +139,7 @@ export interface FeishuTransportConfig {
   appId: string;
   /** Feishu app secret from Developer Console */
   appSecret: string;
-  agentManager: AgentManager;
+  agentManager: DefaultAgentManager;
   sessionStore: SessionStore;
   /** Default agent ID to use for incoming messages */
   defaultAgentId?: string;
@@ -449,8 +449,7 @@ export class FeishuTransport implements Transport {
   // ---------------------------------------------------------------------------
 
   private async runAgentAndReply(
-    agent: AgentInstance,
-    input: AgentMessage[],
+    agent: PiMonoInstance,    input: AgentMessage[],
     chatId: string,
     sessionId: string,
   ): Promise<void> {
