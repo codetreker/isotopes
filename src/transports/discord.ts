@@ -12,15 +12,15 @@ import {
   type ThreadChannel,
 } from "discord.js";
 import {
-  textContent,
   type AgentInstance,
   type AgentManager,
   type ChannelsConfig,
-  type Message,
+  type AgentMessage,
   type SessionStore,
   type ThreadBindingConfig,
   type Transport,
 } from "../core/types.js";
+import { userMessage as mkUserMsg, assistantMessage as mkAssistantMsg } from "../core/messages.js";
 import type { ContextConfigFile } from "../core/config.js";
 import { shouldRespondToMessage } from "../core/mention.js";
 import { loggers } from "../core/logger.js";
@@ -538,17 +538,12 @@ export class DiscordTransport implements Transport {
     const inboundMeta = formatInboundMeta(messageMetadata, chatType);
     const contentWithMeta = `${inboundMeta}\n\n${enrichedContent}`;
     
-    const userMessage: Message = {
+    const userMsg: AgentMessage = {
       role: "user",
-      content: textContent(contentWithMeta),
+      content: contentWithMeta,
       timestamp: msg.createdTimestamp,
-      metadata: {
-        userId: msg.author.id,
-        username: msg.author.username,
-        ...messageMetadata,
-      },
-    };
-    await sessionStore.addMessage(session.id, userMessage);
+    } as unknown as AgentMessage;
+    await sessionStore.addMessage(session.id, userMsg);
 
     // 9. Prepare prompt — limitHistoryTurns + sanitize + prune
     const allMessages = await sessionStore.getMessages(session.id);
@@ -814,7 +809,7 @@ export class DiscordTransport implements Transport {
 
   private async runAgentAndRespond(
     agent: AgentInstance,
-    input: string | Message[],
+    input: string | AgentMessage[],
     channel: SendableChannel,
     sessionId: string,
     sessionStore: SessionStore,
@@ -886,12 +881,7 @@ export class DiscordTransport implements Transport {
             // messages, leaving the assistant reply referencing user input that
             // appears never to have been sent.
             for (const m of messages) {
-              await sessionStore.addMessage(sessionId, {
-                role: "user",
-                content: textContent(m.content),
-                timestamp: m.timestamp,
-                metadata: { sender: m.sender, buffered: true },
-              });
+              await sessionStore.addMessage(sessionId, mkUserMsg(m.content, m.timestamp));
             }
 
             const formatted = messages.map(m => `${m.sender}: ${m.content}`).join("\n");
@@ -931,12 +921,7 @@ export class DiscordTransport implements Transport {
 
       if (errorMessage) {
         const finalErrorMessage = `❌ ${errorMessage}`;
-        await sessionStore.addMessage(sessionId, {
-          role: "assistant",
-          content: textContent(finalErrorMessage),
-          timestamp: Date.now(),
-          metadata: { isError: true },
-        });
+        await sessionStore.addMessage(sessionId, mkAssistantMsg(finalErrorMessage));
         await channel.send(finalErrorMessage);
       }
     } catch (error) {

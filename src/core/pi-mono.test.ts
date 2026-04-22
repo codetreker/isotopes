@@ -1,6 +1,7 @@
 // src/core/pi-mono.test.ts — Unit tests for PiMonoCore
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { AgentConfig, AgentEvent, Message } from "./types.js";
+import type { AgentConfig, AgentEvent, AgentMessage } from "./types.js";
+import { msgField } from "./messages.js";
 
 // ---------------------------------------------------------------------------
 // Mock setup
@@ -41,7 +42,6 @@ vi.mock("@mariozechner/pi-ai", () => ({
 import { Agent } from "@mariozechner/pi-agent-core";
 import { getModel } from "@mariozechner/pi-ai";
 import { PiMonoCore, stripOrphanedToolResults } from "./pi-mono.js";
-import { textContent } from "./types.js";
 import { ToolRegistry } from "./tools.js";
 
 // ---------------------------------------------------------------------------
@@ -104,24 +104,24 @@ describe("PiMonoCore.createAgent", () => {
   it("steer() delegates to the underlying Agent with mapped message", () => {
     const core = new PiMonoCore();
     const instance = core.createAgent(makeConfig());
-    const msg: Message = { role: "user", content: textContent("hi"), timestamp: 5000 };
+    const msg: AgentMessage = { role: "user", content: "hi", timestamp: 5000 };
 
     instance.steer(msg);
 
     expect(mockAgent.steer).toHaveBeenCalledWith(
-      expect.objectContaining({ role: "user", content: textContent("hi"), timestamp: 5000 }),
+      expect.objectContaining({ role: "user", content: "hi", timestamp: 5000 }),
     );
   });
 
   it("followUp() delegates to the underlying Agent with mapped message", () => {
     const core = new PiMonoCore();
     const instance = core.createAgent(makeConfig());
-    const msg: Message = { role: "user", content: textContent("follow up") };
+    const msg = { role: "user", content: "follow up", timestamp: Date.now() } as unknown as AgentMessage as unknown as AgentMessage;
 
     instance.followUp(msg);
 
     expect(mockAgent.followUp).toHaveBeenCalledWith(
-      expect.objectContaining({ role: "user", content: textContent("follow up") }),
+      expect.objectContaining({ role: "user", content: "follow up" }),
     );
   });
 
@@ -329,14 +329,12 @@ describe("prompt() event mapping", () => {
   function setupEvents(coreEvents: unknown[]) {
     let listener: ((e: unknown) => void) | null = null;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (mockAgent.subscribe as any).mockImplementation((fn: (e: unknown) => void) => {
+    (mockAgent.subscribe as ReturnType<typeof vi.fn>).mockImplementation((fn: (e: unknown) => void) => {
       listener = fn;
       return vi.fn();
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (mockAgent.prompt as any).mockImplementation(() => {
+    (mockAgent.prompt as ReturnType<typeof vi.fn>).mockImplementation(() => {
       for (const ev of coreEvents) {
         listener!(ev);
       }
@@ -366,37 +364,18 @@ describe("prompt() event mapping", () => {
     const core = new PiMonoCore();
     const instance = core.createAgent(makeConfig());
 
-    for await (const _ev of instance.prompt([
-      { role: "user", content: textContent("hello"), timestamp: 1000 },
-      { role: "assistant", content: textContent("hi there"), timestamp: 2000 },
-      {
-        role: "tool_result",
-        content: [{ type: "tool_result", output: "tool output", toolCallId: "call-1", toolName: "readFile" }],
-        timestamp: 3000,
-      },
-    ])) {
+    const inputMsgs = [
+      { role: "user", content: "hello", timestamp: 1000 } as unknown as AgentMessage,
+      { role: "assistant", content: [{ type: "text", text: "hi there" }], timestamp: 2000 } as unknown as AgentMessage,
+      { role: "toolResult", content: "tool output", toolCallId: "call-1", toolName: "readFile", timestamp: 3000 } as unknown as AgentMessage,
+    ];
+
+    for await (const _ev of instance.prompt(inputMsgs)) {
       void _ev;
     }
 
-    expect(mockAgent.prompt).toHaveBeenCalledWith([
-      {
-        role: "user",
-        content: textContent("hello"),
-        timestamp: 1000,
-      },
-      {
-        role: "assistant",
-        content: textContent("hi there"),
-        timestamp: 2000,
-      },
-      {
-        role: "toolResult",
-        content: "tool output",
-        timestamp: 3000,
-        toolCallId: "call-1",
-        toolName: "readFile",
-      },
-    ]);
+    // No conversion — messages pass through directly
+    expect(mockAgent.prompt).toHaveBeenCalledWith(inputMsgs);
   });
 
   it("maps turn_end", async () => {
@@ -458,7 +437,7 @@ describe("prompt() event mapping", () => {
         type: "agent_end",
         messages: [
           { role: "user", content: "hi", timestamp: 1000 },
-          { role: "assistant", content: "hello", timestamp: 2000 },
+          { role: "assistant", content: [{ type: "text", text: "hello" }], timestamp: 2000 },
           {
             role: "toolResult",
             content: "result data",
@@ -475,13 +454,11 @@ describe("prompt() event mapping", () => {
     expect(agentEnd.type).toBe("agent_end");
     expect(agentEnd.messages).toHaveLength(3);
     expect(agentEnd.messages[0].role).toBe("user");
-    expect(agentEnd.messages[0].content).toEqual(textContent("hi"));
+    expect(msgField(agentEnd.messages[0], "content")).toBe("hi");
     expect(agentEnd.messages[1].role).toBe("assistant");
-    expect(agentEnd.messages[1].content).toEqual(textContent("hello"));
-    expect(agentEnd.messages[2].role).toBe("tool_result");
-    expect(agentEnd.messages[2].content).toEqual([
-      { type: "text", text: "result data" },
-    ]);
+    expect(msgField(agentEnd.messages[1], "content")).toEqual([{ type: "text", text: "hello" }]);
+    expect(agentEnd.messages[2].role).toBe("toolResult");
+    expect(msgField(agentEnd.messages[2], "content")).toBe("result data");
   });
 
   it("maps agent_end error metadata from assistant message", async () => {
@@ -503,10 +480,8 @@ describe("prompt() event mapping", () => {
     const agentEnd = events[0] as Extract<AgentEvent, { type: "agent_end" }>;
     expect(agentEnd.stopReason).toBe("error");
     expect(agentEnd.errorMessage).toBe("No API provider registered for api: undefined");
-    expect(agentEnd.messages[0].metadata).toEqual({
-      stopReason: "error",
-      errorMessage: "No API provider registered for api: undefined",
-    });
+    expect(msgField(agentEnd.messages[0], "stopReason")).toBe("error");
+    expect(msgField(agentEnd.messages[0], "errorMessage")).toBe("No API provider registered for api: undefined");
   });
 
   it("skips unknown event types", async () => {
@@ -555,8 +530,7 @@ describe("prompt() event mapping", () => {
 
   it("queues concurrent prompts on the same agent instance", async () => {
     const listeners: Array<(e: unknown) => void> = [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (mockAgent.subscribe as any).mockImplementation((fn: (e: unknown) => void) => {
+    (mockAgent.subscribe as ReturnType<typeof vi.fn>).mockImplementation((fn: (e: unknown) => void) => {
       listeners.push(fn);
       return vi.fn();
     });
@@ -610,8 +584,7 @@ describe("prompt() event mapping", () => {
     const listeners: Array<(e: unknown) => void> = [];
     const unsubs: Array<ReturnType<typeof vi.fn>> = [];
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (mockAgent.subscribe as any).mockImplementation((fn: (e: unknown) => void) => {
+    (mockAgent.subscribe as ReturnType<typeof vi.fn>).mockImplementation((fn: (e: unknown) => void) => {
       listeners.push(fn);
       const unsub = vi.fn();
       unsubs.push(unsub);
@@ -677,76 +650,6 @@ describe("prompt() event mapping", () => {
   });
 });
 
-describe("Message conversion", () => {
-  beforeEach(resetMocks);
-
-  it("maps user role to user", () => {
-    const core = new PiMonoCore();
-    const instance = core.createAgent(makeConfig());
-    instance.steer({ role: "user", content: textContent("hi") });
-
-    expect(mockAgent.steer).toHaveBeenCalledWith(
-      expect.objectContaining({ role: "user" }),
-    );
-  });
-
-  it("maps assistant role to assistant", () => {
-    const core = new PiMonoCore();
-    const instance = core.createAgent(makeConfig());
-    instance.steer({ role: "assistant", content: textContent("hey") });
-
-    expect(mockAgent.steer).toHaveBeenCalledWith(
-      expect.objectContaining({ role: "assistant" }),
-    );
-  });
-
-  it("maps tool_result role to toolResult", () => {
-    const core = new PiMonoCore();
-    const instance = core.createAgent(makeConfig());
-    instance.steer({
-      role: "tool_result",
-      content: [{ type: "tool_result", output: "output", toolCallId: "call-3", toolName: "runTool" }],
-    });
-
-    expect(mockAgent.steer).toHaveBeenCalledWith(
-      expect.objectContaining({ role: "toolResult", content: "output", toolCallId: "call-3", toolName: "runTool" }),
-    );
-  });
-
-  it("uses Date.now() when timestamp is not provided", () => {
-    const now = 1700000000000;
-    vi.spyOn(Date, "now").mockReturnValue(now);
-
-    const core = new PiMonoCore();
-    const instance = core.createAgent(makeConfig());
-    instance.steer({ role: "user", content: textContent("test") });
-
-    expect(mockAgent.steer).toHaveBeenCalledWith(
-      expect.objectContaining({ timestamp: now }),
-    );
-
-    vi.restoreAllMocks();
-  });
-
-  it("serializes assistant tool_call blocks to pi-agent-core toolCall shape", () => {
-    const core = new PiMonoCore();
-    const instance = core.createAgent(makeConfig());
-    instance.steer({
-      role: "assistant",
-      content: [
-        { type: "text", text: "calling" },
-        { type: "tool_call", id: "c-1", name: "shell", input: { cmd: "ls" } },
-      ],
-    });
-
-    const arg = mockAgent.steer.mock.calls[0][0];
-    expect(arg.role).toBe("assistant");
-    expect(arg.content).toEqual([
-      { type: "text", text: "calling" },
-      { type: "toolCall", id: "c-1", name: "shell", input: { cmd: "ls" } },
-    ]);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // stripOrphanedToolResults (#146)

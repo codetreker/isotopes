@@ -9,7 +9,6 @@ import {
   type AgentCore,
   type AgentEvent,
   type AgentInstance,
-  type Message,
   type Tool,
   type Usage,
 } from "./types.js";
@@ -23,7 +22,6 @@ import {
   estimateTotalTokens,
 } from "./compaction.js";
 import { sanitizeToolUseResultPairing } from "./context.js";
-import { toAgentMessage, fromAgentMessage } from "./message-convert.js";
 import { createLogger } from "./logger.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -101,18 +99,16 @@ function resolveModel(config: AgentConfig): Model<Api> {
   return model;
 }
 
-function getAgentEndMetadata(messages: Message[]): {
+function getAgentEndMetadata(messages: AgentMessage[]): {
   stopReason?: string;
   errorMessage?: string;
 } {
-  const assistantMessage = [...messages].reverse().find((message) => message.role === "assistant");
-  const metadata = assistantMessage?.metadata;
-
+  const last = [...messages].reverse().find((m) => m.role === "assistant");
+  if (!last) return {};
+  const m = last as unknown as { stopReason?: string; errorMessage?: string };
   return {
-    stopReason:
-      typeof metadata?.stopReason === "string" ? metadata.stopReason : undefined,
-    errorMessage:
-      typeof metadata?.errorMessage === "string" ? metadata.errorMessage : undefined,
+    stopReason: typeof m.stopReason === "string" ? m.stopReason : undefined,
+    errorMessage: typeof m.errorMessage === "string" ? m.errorMessage : undefined,
   };
 }
 
@@ -340,7 +336,7 @@ class PiMonoInstance implements AgentInstance {
     }
   }
 
-  async *prompt(input: string | Message[]): AsyncIterable<AgentEvent> {
+  async *prompt(input: string | AgentMessage[]): AsyncIterable<AgentEvent> {
     let releaseQueue: (() => void) | undefined;
     const waitForTurn = this.promptQueue.catch(() => undefined);
     this.promptQueue = new Promise<void>((resolve) => {
@@ -362,7 +358,7 @@ class PiMonoInstance implements AgentInstance {
    * If an overflow error is detected, compact context and retry.
    */
   private async *promptWithOverflowRecovery(
-    input: string | Message[],
+    input: string | AgentMessage[],
     retryCount = 0,
   ): AsyncIterable<AgentEvent> {
     const events: (CoreEvent | null)[] = [];
@@ -373,7 +369,7 @@ class PiMonoInstance implements AgentInstance {
     const unsub = this.agent.subscribe((e: CoreEvent) => {
       // Check for overflow in agent_end events
       if (e.type === "agent_end") {
-        const messages = e.messages.map(fromAgentMessage);
+        const messages = e.messages;
         const { errorMessage } = getAgentEndMetadata(messages);
         if (errorMessage && isContextOverflow(errorMessage)) {
           overflowDetected = true;
@@ -388,7 +384,7 @@ class PiMonoInstance implements AgentInstance {
     const done = (
       typeof input === "string"
         ? this.agent.prompt(input)
-        : this.agent.prompt(input.map(toAgentMessage))
+        : this.agent.prompt(input)
     ).then(
       () => {
         events.push(null); // sentinel for normal completion
@@ -468,8 +464,8 @@ class PiMonoInstance implements AgentInstance {
 
           // Sanitize tool_use/tool_result pairing after compaction (#141)
           const sanitized = sanitizeToolUseResultPairing(
-            compactedMessages.map(fromAgentMessage),
-          ).map(toAgentMessage);
+            compactedMessages,
+          );
 
           const tokensAfter = estimateTotalTokens(sanitized);
           log.info(
@@ -502,20 +498,20 @@ class PiMonoInstance implements AgentInstance {
     this.agent.abort();
   }
 
-  steer(msg: Message): void {
-    this.agent.steer(toAgentMessage(msg));
+  steer(msg: AgentMessage): void {
+    this.agent.steer(msg);
   }
 
-  followUp(msg: Message): void {
-    this.agent.followUp(toAgentMessage(msg));
+  followUp(msg: AgentMessage): void {
+    this.agent.followUp(msg);
   }
 
   clearMessages(): void {
     this.agent.reset();
   }
 
-  getMessages(): Message[] {
-    return this.agent.state.messages.map(fromAgentMessage);
+  getMessages(): AgentMessage[] {
+    return this.agent.state.messages;
   }
 
   /**
@@ -555,8 +551,8 @@ class PiMonoInstance implements AgentInstance {
 
       // Sanitize tool_use/tool_result pairing after compaction (#141)
       const sanitized = sanitizeToolUseResultPairing(
-        compactedMessages.map(fromAgentMessage),
-      ).map(toAgentMessage);
+        compactedMessages,
+      );
 
       this.agent.state.messages = sanitized;
       return true;
@@ -614,7 +610,7 @@ function mapEvent(e: CoreEvent): AgentEvent | null {
       };
 
     case "agent_end": {
-      const messages = e.messages.map(fromAgentMessage);
+      const messages = e.messages;
       const { stopReason, errorMessage } = getAgentEndMetadata(messages);
       return {
         type: "agent_end",

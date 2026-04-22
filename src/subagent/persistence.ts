@@ -9,8 +9,8 @@
 import { randomUUID } from "node:crypto";
 
 import { createLogger } from "../core/logger.js";
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type {
-  Message,
   Session,
   SessionMetadata,
   SessionStore,
@@ -42,7 +42,7 @@ function safeStringify(value: unknown): string {
 }
 
 /**
- * Convert one SubagentEvent into a Message suitable for SessionStore.
+ * Convert one SubagentEvent into an AgentMessage suitable for SessionStore.
  *
  * Returns undefined for control events (start/done) — those drive
  * session lifecycle and metadata, not transcript content.
@@ -52,7 +52,7 @@ function safeStringify(value: unknown): string {
  * `tool_result` content block so downstream consumers can read them
  * uniformly with main-agent transcripts.
  */
-export function eventToMessage(event: SubagentEvent): Message | undefined {
+export function eventToMessage(event: SubagentEvent): AgentMessage | undefined {
   const timestamp = Date.now();
   switch (event.type) {
     case "start":
@@ -66,7 +66,7 @@ export function eventToMessage(event: SubagentEvent): Message | undefined {
         role: "assistant",
         content: [{ type: "text", text }],
         timestamp,
-      };
+      } as unknown as AgentMessage;
     }
 
     case "tool_use": {
@@ -77,24 +77,18 @@ export function eventToMessage(event: SubagentEvent): Message | undefined {
         role: "assistant",
         content: [{ type: "text", text }],
         timestamp,
-        metadata: { subagentEvent: "tool_use", toolName: name },
-      };
+      } as unknown as AgentMessage;
     }
 
     case "tool_result": {
       const output = truncate(event.toolResult ?? "");
       return {
-        role: "tool_result",
-        content: [
-          {
-            type: "tool_result",
-            output,
-            toolName: event.toolName,
-          },
-        ],
+        role: "toolResult",
+        content: output,
+        toolCallId: "subagent",
+        toolName: event.toolName ?? "unknown",
         timestamp,
-        metadata: { subagentEvent: "tool_result" },
-      };
+      } as unknown as AgentMessage;
     }
 
     case "error": {
@@ -103,8 +97,7 @@ export function eventToMessage(event: SubagentEvent): Message | undefined {
         role: "assistant",
         content: [{ type: "text", text: `❌ ${text}` }],
         timestamp,
-        metadata: { subagentEvent: "error", error: true },
-      };
+      } as unknown as AgentMessage;
     }
 
     default:

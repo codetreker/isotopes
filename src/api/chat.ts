@@ -3,7 +3,7 @@
 
 import { addRoute } from "./routes.js";
 import { sendJson, sendError } from "./middleware.js";
-import { textContent } from "../core/types.js";
+import { userMessage as mkUserMsg, assistantMessage as mkAssistantMsg, messageText } from "../core/messages.js";
 import { createLogger } from "../core/logger.js";
 import { randomUUID } from "node:crypto";
 
@@ -112,13 +112,13 @@ addRoute("POST", "/api/chat/sessions/:id/message", async (req, res, deps) => {
   }
 
   // Store user message + emit hook
-  const userMessage = { role: "user" as const, content: textContent(body.message), timestamp: Date.now() };
+  const userMessage = mkUserMsg(body.message);
   if (deps.sessionStoreManager) {
     const store = await deps.sessionStoreManager.getOrCreate(session.agentId);
     await store.addMessage(sessionId, userMessage);
   }
   if (deps.hooks) {
-    await deps.hooks.emit("message_received", { agentId: session.agentId, sessionId, message: { role: "user", content: textContent(body.message) } });
+    await deps.hooks.emit("message_received", { agentId: session.agentId, sessionId, message: mkUserMsg(body.message) });
   }
 
   // Set up SSE
@@ -171,14 +171,10 @@ addRoute("POST", "/api/chat/sessions/:id/message", async (req, res, deps) => {
     if (responseText) {
       if (deps.sessionStoreManager) {
         const store = await deps.sessionStoreManager.getOrCreate(session.agentId);
-        await store.addMessage(sessionId, {
-          role: "assistant",
-          content: textContent(responseText),
-          timestamp: Date.now(),
-        });
+        await store.addMessage(sessionId, mkAssistantMsg(responseText));
       }
       if (deps.hooks) {
-        await deps.hooks.emit("message_sending", { agentId: session.agentId, sessionId, message: { role: "assistant", content: textContent(responseText) } });
+        await deps.hooks.emit("message_sending", { agentId: session.agentId, sessionId, message: mkAssistantMsg(responseText) });
       }
     }
     if (deps.hooks) {
@@ -230,7 +226,7 @@ addRoute("POST", "/api/chat/sessions/:id/steer", (req, res, deps) => {
     return;
   }
 
-  agent.steer({ role: "user", content: textContent(body.message) });
+  agent.steer(mkUserMsg(body.message));
   sendJson(res, 200, { ok: true });
 });
 
@@ -257,7 +253,7 @@ addRoute("POST", "/api/chat/sessions/:id/followup", (req, res, deps) => {
     return;
   }
 
-  agent.followUp({ role: "user", content: textContent(body.message) });
+  agent.followUp(mkUserMsg(body.message));
   sendJson(res, 200, { ok: true });
 });
 
@@ -282,10 +278,9 @@ addRoute("GET", "/api/chat/sessions/:id/messages", async (req, res, deps) => {
   sendJson(res, 200, {
     messages: messages.map((m) => ({
       role: m.role,
-      content: Array.isArray(m.content)
-        ? m.content.map((b) => ("text" in b ? b.text : JSON.stringify(b))).join("")
-        : String(m.content),
-      timestamp: m.timestamp ? new Date(m.timestamp).toISOString() : undefined,
+      content: messageText(m),
+      timestamp: "timestamp" in m && typeof m.timestamp === "number"
+        ? new Date(m.timestamp).toISOString() : undefined,
     })),
   });
 });
