@@ -14,6 +14,7 @@ import TextInput from "ink-text-input";
 
 export type LlmChoice = "ghc-proxy" | "skip";
 export type ChannelChoice = "discord" | "skip";
+export type SubagentChoice = "enabled" | "skip";
 
 export interface GhcProxyAnswers {
   baseUrl: string;
@@ -32,11 +33,23 @@ export interface DiscordAnswers {
   groupAllowlist?: string[];
 }
 
+import type { SubagentPermissionMode } from "../core/config.js";
+export type SubagentEnableShellChoice = "yes" | "no";
+export type SubagentTypeChoice = "claude" | "builtin" | "both";
+
+export interface SubagentAnswers {
+  allowedTypes: ("claude" | "builtin")[];
+  permissionMode: SubagentPermissionMode;
+  enableShell: boolean;
+}
+
 export interface InitAnswers {
   llm: LlmChoice;
   ghcProxy?: GhcProxyAnswers;
   channel: ChannelChoice;
   discord?: DiscordAnswers;
+  subagent: SubagentChoice;
+  subagentConfig?: SubagentAnswers;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,7 +72,11 @@ type Step =
   | { kind: "discord-dm-policy" }
   | { kind: "discord-dm-userId" }
   | { kind: "discord-group-policy" }
-  | { kind: "discord-group-allowlist" };
+  | { kind: "discord-group-allowlist" }
+  | { kind: "subagent" }
+  | { kind: "subagent-types" }
+  | { kind: "subagent-permissionMode" }
+  | { kind: "subagent-enableShell" };
 
 interface Props {
   onDone: (answers: InitAnswers) => void;
@@ -81,6 +98,11 @@ function InitWizard({ onDone }: Props) {
   const [groupPolicy, setGroupPolicy] = useState<GroupPolicyChoice>("allowlist");
   const [groupAllowlistInput, setGroupAllowlistInput] = useState("");
 
+  const [subagent, setSubagent] = useState<SubagentChoice>("skip");
+  const [subagentTypes, setSubagentTypes] = useState<("claude" | "builtin")[]>(["claude", "builtin"]);
+  const [subagentPermissionMode, setSubagentPermissionMode] = useState<SubagentPermissionMode>("allowlist");
+  const [subagentEnableShell, setSubagentEnableShell] = useState(false);
+
   useInput((_input, key) => {
     if (key.ctrl && _input === "c") {
       exit();
@@ -92,6 +114,7 @@ function InitWizard({ onDone }: Props) {
     const answers: InitAnswers = {
       llm,
       channel,
+      subagent,
       ...(llm === "ghc-proxy"
         ? { ghcProxy: { baseUrl: ghcBaseUrl, apiKey: ghcApiKey, model: ghcModel } }
         : {}),
@@ -110,6 +133,9 @@ function InitWizard({ onDone }: Props) {
             },
           }
         : {}),
+      ...(subagent === "enabled"
+        ? { subagentConfig: { allowedTypes: subagentTypes, permissionMode: subagentPermissionMode, enableShell: subagentEnableShell } }
+        : {}),
       ...overrides,
     };
     onDone(answers);
@@ -117,6 +143,7 @@ function InitWizard({ onDone }: Props) {
   };
 
   const goToChannel = () => setStep({ kind: "channel" });
+  const goToSubagent = () => setStep({ kind: "subagent" });
 
   const handleLlmSelect = (item: { value: LlmChoice }) => {
     setLlm(item.value);
@@ -127,7 +154,7 @@ function InitWizard({ onDone }: Props) {
   const handleChannelSelect = (item: { value: ChannelChoice }) => {
     setChannel(item.value);
     if (item.value === "discord") setStep({ kind: "discord-token" });
-    else finish({ channel: item.value });
+    else goToSubagent();
   };
 
   return (
@@ -157,9 +184,14 @@ function InitWizard({ onDone }: Props) {
             <TextInput
               value={ghcBaseUrl}
               onChange={setGhcBaseUrl}
-              onSubmit={() => setStep({ kind: "ghc-apiKey" })}
+              onSubmit={() => {
+                if (ghcBaseUrl.trim().length > 0) setStep({ kind: "ghc-apiKey" });
+              }}
             />
           </Box>
+          {ghcBaseUrl.trim().length === 0 && (
+            <Text color="yellow">  baseUrl is required</Text>
+          )}
         </Box>
       )}
 
@@ -190,9 +222,14 @@ function InitWizard({ onDone }: Props) {
             <TextInput
               value={ghcModel}
               onChange={setGhcModel}
-              onSubmit={goToChannel}
+              onSubmit={() => {
+                if (ghcModel.trim().length > 0) goToChannel();
+              }}
             />
           </Box>
+          {ghcModel.trim().length === 0 && (
+            <Text color="yellow">  model is required</Text>
+          )}
         </Box>
       )}
 
@@ -276,7 +313,7 @@ function InitWizard({ onDone }: Props) {
             onSelect={(item) => {
               setGroupPolicy(item.value);
               if (item.value === "allowlist") setStep({ kind: "discord-group-allowlist" });
-              else finish();
+              else goToSubagent();
             }}
           />
         </Box>
@@ -294,7 +331,7 @@ function InitWizard({ onDone }: Props) {
               onSubmit={() => {
                 const entries = groupAllowlistInput.trim().split(",").map((s) => s.trim()).filter(Boolean);
                 const valid = entries.every((e) => /^\d+(\/\d+)?$/.test(e));
-                if (entries.length > 0 && valid) finish();
+                if (entries.length > 0 && valid) goToSubagent();
               }}
             />
           </Box>
@@ -303,6 +340,77 @@ function InitWizard({ onDone }: Props) {
             const valid = entries.every((e) => /^\d+(\/\d+)?$/.test(e));
             return !valid ? <Text color="yellow">  each entry must be serverId or serverId/channelId (numeric)</Text> : null;
           })()}
+        </Box>
+      )}
+
+      {step.kind === "subagent" && (
+        <Box flexDirection="column">
+          <Text>3) Sub-agent:</Text>
+          <SelectInput
+            items={[
+              { label: "enabled (configure sub-agent execution)", value: "enabled" as const },
+              { label: "skip (configure later)", value: "skip" as const },
+            ]}
+            onSelect={(item: { value: SubagentChoice }) => {
+              setSubagent(item.value);
+              if (item.value === "enabled") setStep({ kind: "subagent-types" });
+              else finish({ subagent: item.value });
+            }}
+          />
+        </Box>
+      )}
+
+      {step.kind === "subagent-types" && (
+        <Box flexDirection="column">
+          <Text>Sub-agent runner types:</Text>
+          <SelectInput
+            items={[
+              { label: "both (claude + builtin)", value: "both" as const },
+              { label: "claude only (Claude Agent SDK)", value: "claude" as const },
+              { label: "builtin only (in-process)", value: "builtin" as const },
+            ]}
+            onSelect={(item: { value: SubagentTypeChoice }) => {
+              const types: ("claude" | "builtin")[] = item.value === "both"
+                ? ["claude", "builtin"]
+                : [item.value];
+              setSubagentTypes(types);
+              if (types.includes("claude")) setStep({ kind: "subagent-permissionMode" });
+              else finish();
+            }}
+          />
+        </Box>
+      )}
+
+      {step.kind === "subagent-permissionMode" && (
+        <Box flexDirection="column">
+          <Text>Claude sub-agent permission mode:</Text>
+          <SelectInput
+            items={[
+              { label: "allowlist (recommended — restrict to a tool allowlist)", value: "allowlist" as const },
+              { label: "default (claude CLI defaults, interactive prompts)", value: "default" as const },
+              { label: "skip (--dangerously-skip-permissions, full access)", value: "skip" as const },
+            ]}
+            onSelect={(item: { value: SubagentPermissionMode }) => {
+              setSubagentPermissionMode(item.value);
+              setStep({ kind: "subagent-enableShell" });
+            }}
+          />
+        </Box>
+      )}
+
+      {step.kind === "subagent-enableShell" && (
+        <Box flexDirection="column">
+          <Text>Enable shell access (Bash) for sub-agents?</Text>
+          <SelectInput
+            items={[
+              { label: "no (default — file tools only)", value: "no" as const },
+              { label: "yes (adds Bash to allowed tools)", value: "yes" as const },
+            ]}
+            onSelect={(item: { value: SubagentEnableShellChoice }) => {
+              setSubagentEnableShell(item.value === "yes");
+              finish();
+            }}
+          />
         </Box>
       )}
     </Box>

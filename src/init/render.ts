@@ -35,6 +35,31 @@ const AGENTS = `agents:
   - id: main
 `;
 
+const SUBAGENT_SKIP = `# subagent:
+#   enabled: true
+#   allowedTypes: [claude, builtin]
+#   claude:
+#     permissionMode: allowlist
+#     enableShell: false
+`;
+
+function renderSubagent(answers: InitAnswers): string {
+  if (answers.subagent !== "enabled" || !answers.subagentConfig) return SUBAGENT_SKIP;
+  const { allowedTypes, permissionMode, enableShell } = answers.subagentConfig;
+  const typesStr = `[${allowedTypes.join(", ")}]`;
+  const hasClaude = allowedTypes.includes("claude");
+  const claudeBlock = hasClaude
+    ? `  claude:
+    permissionMode: ${permissionMode}${permissionMode === "skip" ? "  # --dangerously-skip-permissions" : ""}
+    enableShell: ${enableShell}
+`
+    : "";
+  return `subagent:
+  enabled: true
+  allowedTypes: ${typesStr}
+${claudeBlock}`;
+}
+
 function renderChannels(answers: InitAnswers): string {
   if (answers.channel !== "discord" || !answers.discord) return "";
   const { token, dmPolicy, dmUserId, groupPolicy, groupAllowlist } = answers.discord;
@@ -89,7 +114,7 @@ ${dmBlock}${groupBlock}        threadBindings:
 }
 
 export function renderConfig(answers: InitAnswers): string {
-  return [HEADER, renderProvider(answers), TOOLS, AGENTS, renderChannels(answers)]
+  return [HEADER, renderProvider(answers), TOOLS, AGENTS, renderSubagent(answers), renderChannels(answers)]
     .filter((s) => s.length > 0)
     .join("\n");
 }
