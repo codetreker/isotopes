@@ -3,10 +3,26 @@
 // with the pi-agent-core AgentMessage union.
 
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { ImageContent } from "@mariozechner/pi-ai";
 
 /** Create a user message with text content. */
 export function userMessage(text: string, timestamp?: number): AgentMessage {
   return { role: "user", content: text, timestamp: timestamp ?? Date.now() };
+}
+
+/** Create a user message with text and image content blocks. */
+export function userMessageWithImages(
+  text: string,
+  images: ImageContent[],
+  timestamp?: number,
+): AgentMessage {
+  return {
+    role: "user",
+    content: [{ type: "text" as const, text }, ...images],
+    timestamp: timestamp ?? Date.now(),
+  // pi-agent-core's AgentMessage type doesn't expose pi-ai's multimodal content union;
+  // the runtime accepts it but the typedef is narrower — same pattern as assistantMessage/toolResultMessage.
+  } as unknown as AgentMessage;
 }
 
 /** Create an assistant message with text content. */
