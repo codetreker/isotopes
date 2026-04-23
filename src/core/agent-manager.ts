@@ -16,8 +16,8 @@ export interface AgentCreateOptions {
   workspacePath?: string;
   /** Tool guard prompt section (stored for hot-reload persistence) */
   toolGuardPrompt?: string;
-  /** Base system prompt before workspace assembly (for hot-reload rebuild) */
-  baseSystemPrompt?: string;
+  /** Fully assembled system prompt (workspace + tool guards already merged) */
+  initialSystemPrompt?: string;
 }
 
 /** Internal entry combining config, cache, and workspace */
@@ -25,6 +25,8 @@ interface AgentEntry {
   config: AgentConfig;
   cache: AgentServiceCache;
   workspace: WorkspaceContext | null;
+  /** Assembled system prompt (workspace context + tool guards) */
+  systemPrompt: string;
   /** Base system prompt before workspace assembly (for hot-reload) */
   baseSystemPrompt: string;
   /** Resolved workspace path */
@@ -56,7 +58,8 @@ export class DefaultAgentManager {
       config,
       cache,
       workspace: null,
-      baseSystemPrompt: options?.baseSystemPrompt ?? config.systemPrompt,
+      systemPrompt: options?.initialSystemPrompt ?? "",
+      baseSystemPrompt: "",
       workspacePath: options?.workspacePath,
       toolGuardPrompt: options?.toolGuardPrompt,
     });
@@ -69,6 +72,10 @@ export class DefaultAgentManager {
 
   getConfig(id: string): AgentConfig | undefined {
     return this.agents.get(id)?.config;
+  }
+
+  getSystemPrompt(id: string): string | undefined {
+    return this.agents.get(id)?.systemPrompt;
   }
 
   getWorkspace(id: string): WorkspaceContext | undefined {
@@ -112,11 +119,15 @@ export class DefaultAgentManager {
     if (!entry) {
       throw new Error(`Agent "${id}" not found`);
     }
-    return entry.config.systemPrompt;
+    return entry.systemPrompt;
   }
 
   async updatePrompt(id: string, prompt: string): Promise<void> {
-    await this.update(id, { systemPrompt: prompt });
+    const entry = this.agents.get(id);
+    if (!entry) {
+      throw new Error(`Agent "${id}" not found`);
+    }
+    entry.systemPrompt = prompt;
   }
 
   async reloadWorkspace(id: string): Promise<void> {
@@ -139,6 +150,6 @@ export class DefaultAgentManager {
       systemPrompt = [systemPrompt, entry.toolGuardPrompt].filter(Boolean).join("\n\n---\n\n");
     }
 
-    await this.update(id, { systemPrompt });
+    entry.systemPrompt = systemPrompt;
   }
 }
