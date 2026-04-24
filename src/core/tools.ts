@@ -9,7 +9,7 @@ import { spawnSubagent, getSupportedAgents } from "../tools/subagent.js";
 import { createWebFetchTool, createWebSearchTool } from "../tools/web.js";
 import type { SubagentAgent, SubagentEvent, DiscordSinkConfig } from "../subagent/types.js";
 import { DiscordSink } from "../transports/discord-subagent-sink.js";
-import { getSubagentContext } from "./subagent-context.js";
+import { getTransportContext } from "./transport-context.js";
 import { failureTracker } from "../subagent/failure-tracker.js";
 import { createLogger } from "./logger.js";
 const log = createLogger("tools:subagent");
@@ -242,7 +242,7 @@ export function createSubagentTool(options: SubagentToolOptions): { tool: Tool; 
         ? path.resolve(workspacePath, working_directory)
         : workspacePath;
       // Check for Discord context
-      const discordContext = getSubagentContext();
+      const discordContext = getTransportContext();
 
       // Check failure tracker (only when sessionId available)
       const sessionId = discordContext?.sessionId;
@@ -324,13 +324,15 @@ async function runSubagentWithDiscord(
   cwd: string,
   timeout: number | undefined,
   allowedWorkspaces: string[],
-  context: NonNullable<ReturnType<typeof getSubagentContext>>,
+  context: NonNullable<ReturnType<typeof getTransportContext>>,
   maxTurns?: number,
   parentAgentId?: string,
   builtin?: { provider: ProviderConfig; tools: ToolRegistry },
 ): Promise<string> {
   const { sendMessage, createThread, channelId, showToolCalls = true, onComplete } = context;
-  // Create Discord sink with thread enabled
+  if (!createThread) {
+    return "[error] Transport context does not support thread creation";
+  }
   const sinkConfig: DiscordSinkConfig = {
     showToolCalls,
     showThinking: false,
