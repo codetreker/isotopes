@@ -1,4 +1,4 @@
-// src/transports/feishu.test.ts — Unit tests for FeishuTransport
+// src/plugins/feishu/transport.test.ts — Unit tests for FeishuTransport
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
@@ -9,15 +9,15 @@ import {
   isBotMentioned,
   shouldRespondToGroupMessage,
   resolveAgentId,
-  type FeishuMessageEvent,
-} from "./feishu.js";
-import type { SessionStore, ChannelsConfig, Binding } from "../core/types.js";
-import type { AgentServiceCache } from "../core/pi-mono.js";
-import type { DefaultAgentManager } from "../core/agent-manager.js";
+} from "./transport.js";
+import type { FeishuMessageEvent } from "./types.js";
+import type { SessionStore, ChannelsConfig, Binding } from "../../core/types.js";
+import type { AgentServiceCache } from "../../core/pi-mono.js";
+import type { DefaultAgentManager } from "../../core/agent-manager.js";
 import {
   createMockAgentManager,
   createMockSessionStore,
-} from "../core/test-helpers.js";
+} from "../../core/test-helpers.js";
 
 // Suppress console output during tests
 vi.spyOn(console, "log").mockImplementation(() => {});

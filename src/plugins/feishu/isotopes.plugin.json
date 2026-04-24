@@ -1,0 +1,7 @@
+{
+  "id": "feishu",
+  "name": "Feishu Transport",
+  "version": "1.0.0",
+  "description": "Feishu (Lark) transport plugin for Isotopes",
+  "entry": "index.js"
+}
