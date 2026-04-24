@@ -59,7 +59,7 @@ export interface ApiServerDeps {
   configReloader?: ConfigReloader;
   agentManager?: DefaultAgentManager;
   usageTracker?: UsageTracker;
-  discordSessionStores?: Map<string, SessionStore>;
+  transportSessionRegistry?: Map<string, Map<string, SessionStore>>;
   uiRegistry?: UIRegistry;
   sessionStoreManager?: SessionStoreManager;
   hooks?: HookRegistry;
@@ -80,7 +80,7 @@ export class ApiServer {
       configReloader: deps.configReloader,
       agentManager: deps.agentManager,
       usageTracker: deps.usageTracker,
-      discordSessionStores: deps.discordSessionStores,
+      transportSessionRegistry: deps.transportSessionRegistry,
       sessionStoreManager: deps.sessionStoreManager,
       hooks: deps.hooks,
     };

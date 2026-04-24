@@ -27,7 +27,7 @@ export interface RouteDeps {
   cronScheduler: CronScheduler;
   configReloader?: ConfigReloader;
   agentManager?: DefaultAgentManager;
-  discordSessionStores?: Map<string, SessionStore>;
+  transportSessionRegistry?: Map<string, Map<string, SessionStore>>;
   usageTracker?: UsageTracker;
   sessionStoreManager?: SessionStoreManager;
   hooks?: HookRegistry;
@@ -110,7 +110,7 @@ addRoute("GET", "/api/status", (_req, res, deps) => {
 // ---------------------------------------------------------------------------
 
 addRoute("GET", "/api/sessions", async (_req, res, deps) => {
-  const discordSessions: Array<{
+  const sessions: Array<{
     id: string;
     key?: string;
     agentId: string;
@@ -123,28 +123,30 @@ addRoute("GET", "/api/sessions", async (_req, res, deps) => {
     messageCount: number;
     source: string;
   }> = [];
-  if (deps.discordSessionStores) {
-    for (const [agentId, store] of deps.discordSessionStores) {
-      const sessions = await store.list();
-      for (const s of sessions) {
-        discordSessions.push({
-          id: s.id,
-          key: s.metadata?.key,
-          agentId: s.agentId || agentId,
-          threadId: s.metadata?.threadId,
-          channelName: s.metadata?.channelName,
-          guildName: s.metadata?.guildName,
-          status: "active",
-          createdAt: s.lastActiveAt.toISOString(),
-          lastActivityAt: s.lastActiveAt.toISOString(),
-          messageCount: 0,
-          source: "discord",
-        });
+  if (deps.transportSessionRegistry) {
+    for (const [source, stores] of deps.transportSessionRegistry) {
+      for (const [agentId, store] of stores) {
+        const list = await store.list();
+        for (const s of list) {
+          sessions.push({
+            id: s.id,
+            key: s.metadata?.key,
+            agentId: s.agentId || agentId,
+            threadId: s.metadata?.threadId,
+            channelName: s.metadata?.channelName,
+            guildName: s.metadata?.guildName,
+            status: "active",
+            createdAt: s.lastActiveAt.toISOString(),
+            lastActivityAt: s.lastActiveAt.toISOString(),
+            messageCount: 0,
+            source,
+          });
+        }
       }
     }
   }
 
-  sendJson(res, 200, discordSessions);
+  sendJson(res, 200, sessions);
 });
 
 // ---------------------------------------------------------------------------
@@ -152,27 +154,29 @@ addRoute("GET", "/api/sessions", async (_req, res, deps) => {
 // ---------------------------------------------------------------------------
 
 addRoute("GET", "/api/sessions/:id", async (req, res, deps) => {
-  if (deps.discordSessionStores) {
-    for (const store of deps.discordSessionStores.values()) {
-      const discordSession = await store.get(req.params.id);
-      if (discordSession) {
-        const messages = await store.getMessages(req.params.id);
-        sendJson(res, 200, {
-          id: discordSession.id,
-          agentId: discordSession.agentId,
-          threadId: discordSession.metadata?.threadId,
-          status: "active",
-          createdAt: discordSession.lastActiveAt.toISOString(),
-          lastActivityAt: discordSession.lastActiveAt.toISOString(),
-          source: "discord",
-          history: messages.map((m) => ({
-            role: m.role,
-            content: messageText(m),
-            timestamp: "timestamp" in m && typeof m.timestamp === "number"
-              ? new Date(m.timestamp).toISOString() : undefined,
-          })),
-        });
-        return;
+  if (deps.transportSessionRegistry) {
+    for (const [source, stores] of deps.transportSessionRegistry) {
+      for (const store of stores.values()) {
+        const session = await store.get(req.params.id);
+        if (session) {
+          const messages = await store.getMessages(req.params.id);
+          sendJson(res, 200, {
+            id: session.id,
+            agentId: session.agentId,
+            threadId: session.metadata?.threadId,
+            status: "active",
+            createdAt: session.lastActiveAt.toISOString(),
+            lastActivityAt: session.lastActiveAt.toISOString(),
+            source,
+            history: messages.map((m) => ({
+              role: m.role,
+              content: messageText(m),
+              timestamp: "timestamp" in m && typeof m.timestamp === "number"
+                ? new Date(m.timestamp).toISOString() : undefined,
+            })),
+          });
+          return;
+        }
       }
     }
   }
@@ -185,20 +189,22 @@ addRoute("GET", "/api/sessions/:id", async (req, res, deps) => {
 // ---------------------------------------------------------------------------
 
 addRoute("GET", "/api/sessions/:id/messages", async (req, res, deps) => {
-  if (deps.discordSessionStores) {
-    for (const store of deps.discordSessionStores.values()) {
-      const discordSession = await store.get(req.params.id);
-      if (discordSession) {
-        const messages = await store.getMessages(req.params.id);
-        sendJson(res, 200, {
-          messages: messages.map((m) => ({
-            role: m.role,
-            content: messageText(m),
-            timestamp: "timestamp" in m && typeof m.timestamp === "number"
-              ? new Date(m.timestamp).toISOString() : undefined,
-          })),
-        });
-        return;
+  if (deps.transportSessionRegistry) {
+    for (const stores of deps.transportSessionRegistry.values()) {
+      for (const store of stores.values()) {
+        const session = await store.get(req.params.id);
+        if (session) {
+          const messages = await store.getMessages(req.params.id);
+          sendJson(res, 200, {
+            messages: messages.map((m) => ({
+              role: m.role,
+              content: messageText(m),
+              timestamp: "timestamp" in m && typeof m.timestamp === "number"
+                ? new Date(m.timestamp).toISOString() : undefined,
+            })),
+          });
+          return;
+        }
       }
     }
   }

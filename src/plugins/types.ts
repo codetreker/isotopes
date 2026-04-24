@@ -3,11 +3,14 @@
 
 import type { Logger } from "../core/logger.js";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { Tool, Transport } from "../core/types.js";
+import type { Tool, Transport, SessionStore } from "../core/types.js";
 import type { ToolHandler } from "../core/tools.js";
 import type { DefaultAgentManager } from "../core/agent-manager.js";
 import type { SessionStoreManager } from "../core/session-store-manager.js";
 import type { IsotopesConfigFile } from "../core/config.js";
+import type { UsageTracker } from "../core/usage-tracker.js";
+import type { SubagentSinkFactory } from "../core/transport-context.js";
+import type { HookRegistry } from "./hooks.js";
 
 // ---------------------------------------------------------------------------
 // Plugin manifest (isotopes.plugin.json)
@@ -81,6 +84,10 @@ export interface TransportFactoryContext {
   agentManager: DefaultAgentManager;
   sessionStoreManager: SessionStoreManager;
   config: IsotopesConfigFile;
+  usageTracker: UsageTracker;
+  hooks: HookRegistry;
+  registerSink: (factory: SubagentSinkFactory) => void;
+  registerSessionSource: (id: string, stores: Map<string, SessionStore>) => void;
 }
 
 // ---------------------------------------------------------------------------

@@ -293,9 +293,12 @@ export async function createRuntime(opts: RuntimeOptions): Promise<Runtime> {
     log.info(`Cron scheduler started with ${cronScheduler.listJobs().length} job(s)`);
   }
 
+  // Transport session registry — transports register their session stores here,
+  // and the API server queries this instead of hardcoding a specific transport.
+  const transportSessionRegistry = new Map<string, Map<string, import("./types.js").SessionStore>>();
+
   // Discord transport
   let discordManager: DiscordTransportManager | undefined;
-  let discordSessionStores: Map<string, DefaultSessionStore> | undefined;
 
   if (config.channels?.discord) {
     const accounts = config.channels.discord.accounts ?? {};
@@ -307,7 +310,7 @@ export async function createRuntime(opts: RuntimeOptions): Promise<Runtime> {
       for (const agentFile of config.agents) {
         sessionStores.set(agentFile.id, await sessionStoreManager.getOrCreate(agentFile.id));
       }
-      discordSessionStores = sessionStores;
+      transportSessionRegistry.set("discord", sessionStores);
 
       const firstAccount = Object.values(accounts)[0];
       const defaultAgentId = firstAccount?.defaultAgentId || config.agents[0]?.id;
@@ -355,7 +358,19 @@ export async function createRuntime(opts: RuntimeOptions): Promise<Runtime> {
   const pluginTransports: import("./types.js").Transport[] = [];
   for (const [id, factory] of pluginManager.getTransportFactories()) {
     try {
-      const transport = await factory({ agentManager, sessionStoreManager, config });
+      const transport = await factory({
+        agentManager,
+        sessionStoreManager,
+        config,
+        usageTracker,
+        hooks: pluginManager.getHooks(),
+        registerSink: (_factory) => {
+          // Sink registration will be wired in a future step
+        },
+        registerSessionSource: (id, stores) => {
+          transportSessionRegistry.set(id, stores);
+        },
+      });
       await transport.start();
       pluginTransports.push(transport);
       log.info(`Plugin transport "${id}" started`);
@@ -373,7 +388,7 @@ export async function createRuntime(opts: RuntimeOptions): Promise<Runtime> {
       usageTracker,
       uiRegistry: pluginManager.getUIRegistry(),
       sessionStoreManager,
-      discordSessionStores,
+      transportSessionRegistry,
       hooks: pluginManager.getHooks(),
     },
   );
