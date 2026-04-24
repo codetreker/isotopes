@@ -83,6 +83,7 @@ export default discordPlugin;
 interface DiscordPluginTransport {
   start(): Promise<void>;
   stop(): Promise<void>;
+  /** @internal Exposed for integration tests and sink wiring. Not part of the public Transport API. */
   _manager: DiscordTransportManager;
 }
 

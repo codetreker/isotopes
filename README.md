@@ -127,6 +127,14 @@ channels:
 
 See [isotopes.example.yaml](isotopes.example.yaml) for all options.
 
+## Plugin Architecture
+
+Transports (Discord, Feishu, etc.) are loaded as plugins. Each plugin lives in `src/plugins/<name>/` with an `isotopes.plugin.json` manifest and an entry point that registers a transport factory via the plugin API.
+
+Plugins can register transports, tools, UI panels, and lifecycle hooks. The plugin system handles discovery, config injection, and lifecycle management automatically.
+
+To create a new transport plugin, see [docs/guides/transport-plugin-development.md](docs/guides/transport-plugin-development.md).
+
 ## Running Multiple Instances
 
 Run two isotopes instances on the same machine (e.g., so agents on one instance can fix the code of another). Each instance needs its own bot token, data directory, and API port:
