@@ -3,25 +3,9 @@
 
 import { createLogger } from "../core/logger.js";
 import type { SubagentEvent, SubagentResult, DiscordSinkConfig } from "../subagent/types.js";
+import type { SubagentEventSink, SendMessageFn, CreateThreadFn } from "../core/transport-context.js";
 
 const log = createLogger("subagent:discord-sink");
-
-// ---------------------------------------------------------------------------
-// Types for Discord message sending
-// ---------------------------------------------------------------------------
-
-/** Function to send a message to a Discord channel/thread */
-export type SendMessageFn = (
-  channelId: string,
-  content: string,
-) => Promise<{ id: string }>;
-
-/** Function to create a thread from a message */
-export type CreateThreadFn = (
-  channelId: string,
-  name: string,
-  messageId: string,
-) => Promise<{ id: string }>;
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -154,7 +138,7 @@ export function formatSummary(result: SubagentResult, threadId?: string): string
  * - Sends individual events to the thread
  * - Sends the final summary to the **main channel** (not the thread)
  */
-export class DiscordSink {
+export class DiscordSink implements SubagentEventSink {
   /** The channel where events are sent (thread if created, otherwise main channel) */
   private targetChannelId: string;
   /** The thread ID if one was created */
@@ -270,5 +254,13 @@ export class DiscordSink {
    */
   getMainChannelId(): string {
     return this.mainChannelId;
+  }
+
+  getOutputChannelId(): string | undefined {
+    return this.threadId;
+  }
+
+  onCancel(): void {
+    log.debug("DiscordSink cancelled", { threadId: this.threadId });
   }
 }

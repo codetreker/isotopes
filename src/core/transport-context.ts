@@ -3,13 +3,23 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 
+import type { SubagentEvent, SubagentResult } from "../subagent/types.js";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/** Placeholder for SubagentEventSink (defined in Step 2) */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface SubagentEventSink {}
+/** Abstract sink that receives sub-agent lifecycle events. */
+export interface SubagentEventSink {
+  start(taskName: string): Promise<void>;
+  sendEvent(event: SubagentEvent): Promise<void>;
+  finish(result: SubagentResult): Promise<void>;
+  getOutputChannelId?(): string | undefined;
+  onCancel?(): void;
+}
+
+/** Factory that creates a sink for a given channel/session pair. */
+export type SubagentSinkFactory = (channelId: string, sessionId?: string) => SubagentEventSink;
 
 /** Function to send a message to a channel */
 export type SendMessageFn = (channelId: string, content: string) => Promise<{ id: string }>;

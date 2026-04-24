@@ -23,7 +23,7 @@ export {
   formatEvent,
   formatSummary,
 } from "../transports/discord-subagent-sink.js";
-export type { SendMessageFn, CreateThreadFn } from "../transports/discord-subagent-sink.js";
+export type { SendMessageFn, CreateThreadFn, SubagentEventSink, SubagentSinkFactory } from "../core/transport-context.js";
 
 export { TaskRegistry, taskRegistry } from "./task-registry.js";
 export type { TaskInfo } from "./task-registry.js";

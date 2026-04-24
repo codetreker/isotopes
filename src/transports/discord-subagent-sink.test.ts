@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { truncate, formatEvent, formatSummary, DiscordSink } from "./discord-subagent-sink.js";
 import type { SubagentEvent, SubagentResult, DiscordSinkConfig } from "../subagent/types.js";
+import type { SubagentEventSink } from "../core/transport-context.js";
 
 const showAll: DiscordSinkConfig = { showToolCalls: true, showThinking: false, useThread: false };
 const hideTools: DiscordSinkConfig = { showToolCalls: false, showThinking: false, useThread: false };
@@ -126,5 +127,46 @@ describe("DiscordSink", () => {
     await sink.start("t");
     expect(createThread).not.toHaveBeenCalled();
     expect(sink.getThreadId()).toBeUndefined();
+  });
+
+  it("implements SubagentEventSink interface", () => {
+    const sendMessage = vi.fn().mockResolvedValue({ id: "msg-1" });
+    const createThread = vi.fn().mockResolvedValue({ id: "thread-1" });
+    const sink: SubagentEventSink = new DiscordSink(sendMessage, createThread, "ch", {
+      showToolCalls: true,
+      showThinking: false,
+      useThread: true,
+    });
+    expect(sink.start).toBeTypeOf("function");
+    expect(sink.sendEvent).toBeTypeOf("function");
+    expect(sink.finish).toBeTypeOf("function");
+    expect(sink.getOutputChannelId).toBeTypeOf("function");
+    expect(sink.onCancel).toBeTypeOf("function");
+  });
+
+  it("getOutputChannelId returns threadId after start", async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ id: "msg-1" });
+    const createThread = vi.fn().mockResolvedValue({ id: "thread-42" });
+    const sink = new DiscordSink(sendMessage, createThread, "ch", {
+      showToolCalls: true,
+      showThinking: false,
+      useThread: true,
+    });
+
+    expect(sink.getOutputChannelId()).toBeUndefined();
+    await sink.start("task");
+    expect(sink.getOutputChannelId()).toBe("thread-42");
+  });
+
+  it("getOutputChannelId returns undefined when no thread", async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ id: "msg-1" });
+    const createThread = vi.fn();
+    const sink = new DiscordSink(sendMessage, createThread, "ch", {
+      showToolCalls: true,
+      showThinking: false,
+      useThread: false,
+    });
+    await sink.start("t");
+    expect(sink.getOutputChannelId()).toBeUndefined();
   });
 });
