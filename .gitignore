@@ -36,8 +36,8 @@ isotopes.yml
 # Local Claude Code working dirs (plans, scratch, etc.)
 .claude/
 
-# plugins
-plugins/
+# plugins (top-level runtime plugins dir)
+/plugins/
 
 # teamwork
 .teamwork
