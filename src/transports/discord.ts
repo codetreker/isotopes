@@ -33,9 +33,9 @@ import { createReplyResolver, type ReplyToMode } from "./reply-directive.js";
 import type { UsageTracker } from "../core/usage-tracker.js";
 import { buildSessionKey } from "../core/session-keys.js";
 import {
-  runWithSubagentContextAsync,
-  type SubagentDiscordContext,
-} from "../core/subagent-context.js";
+  runWithTransportContextAsync,
+  type TransportContext,
+} from "../core/transport-context.js";
 import { ChannelHistoryBuffer, buildHistoryContext } from "../core/channel-history.js";
 import { DedupeCache } from "../core/dedupe.js";
 import { InboundDebouncer } from "../core/debounce.js";
@@ -731,7 +731,7 @@ export class DiscordTransport implements Transport {
    * Create a subagent Discord context for the given channel.
    * This context enables subagent tool to stream output to Discord threads.
    */
-  private createSubagentContext(channel: SendableChannel, sessionId?: string): SubagentDiscordContext {
+  private createSubagentContext(channel: SendableChannel, sessionId?: string): TransportContext {
     const threadBindingConfig = this.config.threadBindings;
     const autoUnbindEnabled = threadBindingConfig?.autoUnbindOnComplete !== false;
     const sendFarewell = threadBindingConfig?.sendFarewell ?? false;
@@ -892,7 +892,7 @@ export class DiscordTransport implements Transport {
       if (this.config.enableSubagentStreaming !== false) {
         // Run with subagent Discord context enabled
         const subagentContext = this.createSubagentContext(channel, sessionId);
-        const result = await runWithSubagentContextAsync(subagentContext, runLoop);
+        const result = await runWithTransportContextAsync(subagentContext, runLoop);
 
         errorMessage = result.errorMessage;
         responseText = result.responseText;
