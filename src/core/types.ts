@@ -202,13 +202,13 @@ export interface GuildConfig {
   };
 }
 
-/** Per-account Discord context configuration */
+/** @deprecated Import from `../plugins/discord/types.js` instead. */
 export type { DiscordAccountContextConfig } from "../plugins/discord/types.js";
 
-/** Per-account Discord subagent streaming configuration */
+/** @deprecated Import from `../plugins/discord/types.js` instead. */
 export type { DiscordAccountSubagentStreamingConfig } from "../plugins/discord/types.js";
 
-/** Discord account configuration within the channels section */
+/** @deprecated Import from `../plugins/discord/types.js` instead. */
 export type { DiscordAccountConfig } from "../plugins/discord/types.js";
 
 /** Channels section of the configuration */
